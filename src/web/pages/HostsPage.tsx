@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { HostConfigDto, api } from '../api';
 import { t } from '../i18n';
 import { HostForm } from '../components/HostForm';
+import { formatDateTime, formatRelative } from '../utils/datetime';
 
 interface Props {
   notify: (kind: 'ok' | 'fail', msg: string) => void;
@@ -120,8 +121,9 @@ export const HostsPage: React.FC<Props> = ({ notify }) => {
                     ))}
                   </div>
                 )}
-                <div className="meta" style={{ fontSize: 11 }}>
-                  更新于 {h.updatedAt ?? '(未知)'}
+                <div className="meta" style={{ fontSize: 11 }} title={h.updatedAt ?? ''}>
+                  更新于 {formatDateTime(h.updatedAt)}
+                  {h.updatedAt && ` · ${formatRelative(h.updatedAt)}`}
                 </div>
               </div>
               <div className="actions">
