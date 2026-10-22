@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### 计划中
+
+- SFTP 上传 / 下载
+- 长连接会话，支持多次命令复用
+- 多主机批量执行
+- 配置加密存储（配合系统 keychain）
+
+## [0.3.0] - 2026-10-22
+
+> **升级提示**：如果你之前用 `--force` 覆盖安装过 skill，现在直接 `ssh-driver install` 即可。
+> `--force` 选项已移除，取而代之的是否定式的 `--no-force`。
+
 ### 变更
 
 - `ssh-driver install` 改为**默认覆盖**已安装的旧版本
@@ -25,13 +37,6 @@
 - 修复新增主机时在弹窗里点「测试」报 hostId 找不到
   - 后端原先先查 store，路径里的 hostId 在新增场景只是前端占位符，必然 404
   - 改为优先使用请求体里的连接信息；hostId 不再是测试连接的前置条件
-
-### 计划中
-
-- SFTP 上传 / 下载
-- 长连接会话，支持多次命令复用
-- 多主机批量执行
-- 配置加密存储（配合系统 keychain）
 
 ## [0.2.0] - 2026-10-22
 
@@ -78,6 +83,7 @@
   - `--timeout` 命令级超时（best-effort，不强制终止远端进程）
 - AI Skill 定义 `skill/SKILL.md`，包含配置流程、字段约定与注意事项
 
-[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/668mt/ssh-driver/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/668mt/ssh-driver/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/668mt/ssh-driver/releases/tag/v0.1.0
