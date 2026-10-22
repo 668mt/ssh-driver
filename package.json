@@ -36,7 +36,8 @@
     "skill",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "npm run build:server && npm run build:web",
@@ -47,7 +48,8 @@
     "dev:console": "node dist/cli.js console --dev",
     "start": "node dist/cli.js",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "prepack": "npm run build"
   },
   "engines": {
     "node": ">=18"

@@ -41,11 +41,37 @@ async function copyDir(src: string, dst: string): Promise<void> {
   }
 }
 
+/**
+ * 向上逐级查找包含 skill/SKILL.md 的包根目录。
+ *
+ * 为什么要探测而不是直接拼路径：
+ *   - 开发态：__dirname = <repo>/src/commands  -> 上两级是 repo 根
+ *   - 发布态：__dirname = <pkg>/dist/commands  -> 上两级是包根
+ * 两者恰好都是"上两级"，但依赖这个巧合很脆弱。
+ * 改成实际探测后兼容任意布局（包括 pnpm 的符号链接结构）。
+ */
+async function resolvePackageRoot(startDir: string): Promise<string | null> {
+  let dir = startDir;
+  for (let i = 0; i < 6; i += 1) {
+    if (await exists(path.join(dir, 'skill', 'SKILL.md'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // 已到文件系统根
+    dir = parent;
+  }
+  return null;
+}
+
 export async function runInstall(opts: InstallOptions = {}): Promise<void> {
   const targetRoot = opts.target ?? path.join(os.homedir(), '.agents', 'skills');
   const targetDir = path.join(targetRoot, SKILL_NAME);
-  const projectRoot = path.resolve(__dirname, '..', '..');
-  const sourceDir = path.join(projectRoot, 'skill');
+
+  const packageRoot = await resolvePackageRoot(__dirname);
+  if (!packageRoot) {
+    throw new Error(
+      '找不到 skill/SKILL.md，请确认安装完整；也可用 --target 指定安装目标目录。',
+    );
+  }
+  const sourceDir = path.join(packageRoot, 'skill');
 
   const sourceFile = path.join(sourceDir, 'SKILL.md');
   const targetFile = path.join(targetDir, 'SKILL.md');
@@ -69,7 +95,7 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
   logger.info(`Installed skill to ${targetFile}`);
 
   if (opts.withWeb) {
-    const srcWeb = path.join(projectRoot, 'dist-server', 'web');
+    const srcWeb = path.join(packageRoot, 'dist-server', 'web');
     const dstWeb = path.join(targetDir, 'web');
     if (await exists(srcWeb)) {
       await copyDir(srcWeb, dstWeb);
