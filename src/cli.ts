@@ -25,15 +25,15 @@ async function main(): Promise<void> {
 
   program
     .command('install')
-    .description('Install the ssh-driver SKILL.md into ~/.agents/skills')
-    .option('-t, --target <dir>', 'override install target root')
-    .option('-f, --force', 'overwrite existing skill', false)
-    .option('--with-web', 'also copy dist-server/web/ into the skill folder', false)
+    .description('安装 ssh-driver 的 SKILL.md 到 ~/.agents/skills（默认覆盖旧版本）')
+    .option('-t, --target <dir>', '指定安装目标根目录，默认 ~/.agents/skills')
+    .option('--no-force', '已存在时不覆盖（默认直接覆盖）')
+    .option('--with-web', '同时把 dist-server/web/ 复制到 skill 目录', false)
     .action(async (opts: { target?: string; force?: boolean; withWeb?: boolean }) => {
       try {
         await runInstall(opts);
       } catch (err) {
-        logger.error(`install failed: ${(err as Error).message}`);
+        logger.error(`安装失败：${(err as Error).message}`);
         process.exitCode = 1;
       }
     });
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
       try {
         await connectRun(hostId);
       } catch (err) {
-        logger.error(`connect failed: ${(err as Error).message}`);
+        logger.error(`连接失败：${(err as Error).message}`);
         process.exitCode = 1;
       }
     });
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
             timeoutMs: opts.timeout,
           });
         } catch (err) {
-          logger.error(`exec failed: ${(err as Error).message}`);
+          logger.error(`执行失败：${(err as Error).message}`);
           process.exitCode = 1;
         }
       },
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
           open: opts.open,
         });
       } catch (err) {
-        logger.error(`console failed: ${(err as Error).message}`);
+        logger.error(`控制台启动失败：${(err as Error).message}`);
         process.exitCode = 1;
       }
     });
@@ -101,6 +101,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  logger.error(`fatal: ${(err as Error).message}`);
+  logger.error(`严重错误：${(err as Error).message}`);
   process.exit(1);
 });

@@ -118,7 +118,7 @@ ssh-driver exec prod-web-01 "df -h" --json
 ## 命令一览
 
 ```text
-ssh-driver install [--with-web] [--force] [--target <dir>]
+ssh-driver install [--with-web] [--no-force] [--target <dir>]
 ssh-driver config add --hostId <id> --host <host> --username <user> [...]
 ssh-driver config list | show | update | remove | test
 ssh-driver connect <hostId>

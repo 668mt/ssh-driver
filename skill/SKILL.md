@@ -21,8 +21,8 @@ description: |
 ```bash
 npm install -g ssh-driver
 ssh-driver install          # 把本 SKILL.md 复制到 ~/.agents/skills/ssh-driver
-# 可选：把构建好的 web 资源也复制过去（仅供本地预览）
-ssh-driver install --with-web --force
+# 默认会覆盖已安装的旧版本；如需保留现场，加 --no-force
+ssh-driver install --with-web
 ```
 
 > 如果是从源码安装：`cd ssh-driver && npm i && npm run build && npm link`。
@@ -30,7 +30,7 @@ ssh-driver install --with-web --force
 ## 命令一览
 
 ```text
-ssh-driver install [--with-web] [--force] [--target <dir>]
+ssh-driver install [--with-web] [--no-force] [--target <dir>]
 ssh-driver console [--port <n>] [--host <addr>] [--dev] [--no-open]
                     # 打开本地网页 console，浏览器中管理 connections
 

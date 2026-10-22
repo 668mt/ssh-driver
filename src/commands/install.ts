@@ -16,7 +16,7 @@ const SKILL_NAME = 'ssh-driver';
 export interface InstallOptions {
   /** 安装目标根目录；默认 ~/.agents/skills */
   target?: string;
-  /** 强制覆盖已有 skill */
+  /** 强制覆盖已有 skill。默认 true —— install 的语义就是装最新版 */
   force?: boolean;
   /** 同时复制 web/ 子目录（构建后的前端） */
   withWeb?: boolean;
@@ -61,7 +61,7 @@ async function resolvePackageRoot(startDir: string): Promise<string | null> {
   return null;
 }
 
-export async function runInstall(opts: InstallOptions = {}): Promise<void> {
+export async function runInstall(opts: InstallOptions = {}) {
   const targetRoot = opts.target ?? path.join(os.homedir(), '.agents', 'skills');
   const targetDir = path.join(targetRoot, SKILL_NAME);
 
@@ -83,27 +83,33 @@ export async function runInstall(opts: InstallOptions = {}): Promise<void> {
     );
   }
 
-  // 检查目标是否已存在
-  if ((await exists(targetFile)) && !opts.force) {
+  // 已存在时默认覆盖；只有显式传 force: false 才拒绝
+  const force = opts.force !== false;
+  const alreadyExists = await exists(targetFile);
+  if (alreadyExists && !force) {
     throw new Error(
-      `Skill already installed at ${targetFile}. Pass --force to overwrite.`,
+      `Skill 已存在于 ${targetFile}。默认会覆盖，如需保留请去掉 --no-force。`,
     );
   }
 
   await fs.mkdir(targetDir, { recursive: true });
   await fs.copyFile(sourceFile, targetFile);
-  logger.info(`Installed skill to ${targetFile}`);
+  logger.info(
+    alreadyExists
+      ? `已覆盖更新 skill：${targetFile}`
+      : `已安装 skill：${targetFile}`,
+  );
 
   if (opts.withWeb) {
     const srcWeb = path.join(packageRoot, 'dist-server', 'web');
     const dstWeb = path.join(targetDir, 'web');
     if (await exists(srcWeb)) {
       await copyDir(srcWeb, dstWeb);
-      logger.info(`Copied web assets to ${dstWeb}`);
+      logger.info(`已复制 web 资源：${dstWeb}`);
     } else {
-      logger.warn(`--with-web requested but build output not found at ${srcWeb}`);
+      logger.warn(`指定了 --with-web，但未找到构建产物：${srcWeb}`);
     }
   }
 
-  logger.info(`Now your AI agent can use the '${SKILL_NAME}' skill.`);
+  logger.info(`AI Agent 现在可以使用 '${SKILL_NAME}' skill 了。`);
 }

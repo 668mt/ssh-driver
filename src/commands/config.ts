@@ -27,7 +27,7 @@ async function loadHostOrThrow(hostId: string) {
   const store = await loadStore();
   const host = findHost(store, hostId);
   if (!host) {
-    throw new Error(`hostId '${hostId}' not found. Run 'ssh-driver config list' to see saved hosts.`);
+    throw new Error(`主机 '${hostId}' 不存在，请先运行 'ssh-driver config list' 查看已保存的主机。`);
   }
   return host;
 }
@@ -72,20 +72,20 @@ export async function configAdd(opts: {
   };
 
   const { created } = await upsertHost(host);
-  logger.info(created ? `added host '${host.hostId}'` : `updated host '${host.hostId}'`);
+  logger.info(created ? `已添加主机 '${host.hostId}'` : `已更新主机 '${host.hostId}'`);
 
   if (opts.test) {
     const stored = await loadHostOrThrow(host.hostId);
     const r = await pingOnce(stored);
-    if (r.ok) logger.info(`test ok: ${r.banner ?? '(connected)'}`);
-    else logger.error(`test failed: ${r.error}`);
+    if (r.ok) logger.info(`测试成功：${r.banner ?? '已连接'}`);
+    else logger.error(`测试失败：${r.error}`);
   }
 }
 
 export async function configList(): Promise<void> {
   const store = await loadStore();
   if (store.hosts.length === 0) {
-    logger.info('No hosts configured. Use `ssh-driver config add ...` to add one.');
+    logger.info('还没有配置任何主机，使用 `ssh-driver config add ...` 添加。');
     return;
   }
   for (const h of store.hosts) {
@@ -107,22 +107,22 @@ export async function configUpdate(
 ): Promise<void> {
   const host = await loadHostOrThrow(hostId);
   await upsertHost({ ...host, ...patch });
-  logger.info(`updated host '${hostId}'`);
+  logger.info(`已更新主机 '${hostId}'`);
 }
 
 export async function configRemove(hostId: string): Promise<void> {
   const ok = await deleteHost(hostId);
-  if (!ok) throw new Error(`hostId '${hostId}' not found`);
-  logger.info(`removed host '${hostId}'`);
+  if (!ok) throw new Error(`主机 '${hostId}' 不存在`);
+  logger.info(`已删除主机 '${hostId}'`);
 }
 
 export async function configTest(hostId: string): Promise<void> {
   const host = await loadHostOrThrow(hostId);
   const r = await pingOnce(host);
   if (r.ok) {
-    logger.info(`OK  ${hostId}  ${r.banner ?? ''}`);
+    logger.info(`连通  ${hostId}  ${r.banner ?? ''}`);
   } else {
-    logger.error(`FAIL ${hostId}: ${r.error}`);
+    logger.error(`不通  ${hostId}：${r.error}`);
     process.exitCode = 1;
   }
 }

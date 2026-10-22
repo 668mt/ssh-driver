@@ -17,7 +17,7 @@ async function resolveHost(hostId: string): Promise<HostConfig> {
   const host = findHost(store, hostId);
   if (!host) {
     throw new Error(
-      `hostId '${hostId}' not found. Run 'ssh-driver config list' to see saved hosts.`,
+      `主机 '${hostId}' 不存在，请先运行 'ssh-driver config list' 查看已保存的主机。`,
     );
   }
   return host;
@@ -27,11 +27,11 @@ export async function connectRun(hostId: string): Promise<void> {
   const host = await resolveHost(hostId);
   const r = await pingOnce(host);
   if (!r.ok) {
-    logger.error(`connect failed: ${r.error}`);
+    logger.error(`连接失败：${r.error}`);
     process.exitCode = 1;
     return;
   }
-  logger.info(`connected to ${hostId} (${host.username}@${host.host}:${host.port ?? 22})`);
+  logger.info(`已连接到 ${hostId}（${host.username}@${host.host}:${host.port ?? 22}）`);
   if (r.banner) console.log(r.banner);
 }
 
@@ -74,7 +74,7 @@ export async function execRun(hostId: string, command: string, opts: ExecOptions
     if (opts.json) {
       console.log(JSON.stringify({ error: (err as Error).message }));
     } else {
-      logger.error(`exec failed: ${(err as Error).message}`);
+      logger.error(`执行失败：${(err as Error).message}`);
     }
     process.exitCode = 1;
   } finally {
