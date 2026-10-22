@@ -25,20 +25,20 @@ export const ioRouter = Router();
 
 function validateHost(h: unknown, idx: number): asserts h is HostConfig {
   if (!h || typeof h !== 'object') {
-    throw new Error(`hosts[${idx}] is not an object`);
+    throw new Error(`hosts[${idx}] 不是一个对象`);
   }
   const x = h as Record<string, unknown>;
   if (typeof x.hostId !== 'string' || !x.hostId) {
-    throw new Error(`hosts[${idx}].hostId missing or not a string`);
+    throw new Error(`hosts[${idx}] 缺少 hostId，或它不是字符串`);
   }
   if (typeof x.host !== 'string' || !x.host) {
-    throw new Error(`hosts[${idx}].host missing or not a string`);
+    throw new Error(`hosts[${idx}].host 缺失，或它不是字符串`);
   }
   if (typeof x.username !== 'string' || !x.username) {
-    throw new Error(`hosts[${idx}].username missing or not a string`);
+    throw new Error(`hosts[${idx}].username 缺失，或它不是字符串`);
   }
   if (!x.password && !x.privateKey) {
-    throw new Error(`hosts[${idx}] needs either password or privateKey`);
+    throw new Error(`hosts[${idx}] 需要提供 password 或 privateKey 其中之一`);
   }
 }
 
@@ -59,7 +59,7 @@ ioRouter.post('/import', async (req: Request, res: Response) => {
   const mode: 'replace' | 'merge' = body.mode === 'merge' ? 'merge' : 'replace';
 
   if (!Array.isArray(body.hosts)) {
-    return res.status(400).json({ error: 'body.hosts must be an array' });
+    return res.status(400).json({ error: '请求体的 hosts 必须是数组' });
   }
 
   // 校验

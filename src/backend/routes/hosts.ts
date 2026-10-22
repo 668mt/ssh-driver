@@ -28,19 +28,30 @@ function notFound(res: Response, msg: string): void {
   res.status(404).json({ error: msg });
 }
 
-function requireHostId(body: Partial<HostConfig>): asserts body is HostConfig {
-  if (!body.hostId || typeof body.hostId !== 'string') {
-    throw new Error('hostId is required and must be a string');
-  }
+/** 统一的"主机不存在"提示 */
+function hostNotFound(res: Response, hostId: string): void {
+  notFound(res, `主机 '${hostId}' 不存在`);
+}
+
+/** 校验主机连接的必要字段（不含 hostId —— 测试连接时 hostId 可以还没填） */
+function requireConnectionFields(body: Partial<HostConfig>): void {
   if (!body.host || typeof body.host !== 'string') {
-    throw new Error('host is required');
+    throw new Error('host（主机/IP）是必填项');
   }
   if (!body.username || typeof body.username !== 'string') {
-    throw new Error('username is required');
+    throw new Error('username（用户名）是必填项');
   }
   if (!body.password && !body.privateKey) {
-    throw new Error('either password or privateKey is required');
+    throw new Error('password 和 privateKey 至少要填一个');
   }
+}
+
+/** 保存主机时的完整校验，必须有 hostId */
+function requireHostId(body: Partial<HostConfig>): asserts body is HostConfig {
+  if (!body.hostId || typeof body.hostId !== 'string') {
+    throw new Error('hostId（唯一标识）是必填项');
+  }
+  requireConnectionFields(body);
 }
 
 function normalize(body: Partial<CreateHostBody>): Partial<CreateHostBody> {
@@ -65,7 +76,7 @@ hostsRouter.get('/', async (_req: Request, res: Response) => {
 hostsRouter.get('/:hostId', async (req: Request, res: Response) => {
   const store = await loadStore();
   const host = findHost(store, String(req.params.hostId));
-  if (!host) return notFound(res, `hostId '${req.params.hostId}' not found`);
+  if (!host) return hostNotFound(res, String(req.params.hostId));
   res.json(plainView(host));
 });
 
@@ -87,7 +98,7 @@ hostsRouter.put('/:hostId', async (req: Request, res: Response) => {
     const oldId = String(req.params.hostId);
     const store = await loadStore();
     const existing = findHost(store, oldId);
-    if (!existing) return notFound(res, `hostId '${oldId}' not found`);
+    if (!existing) return hostNotFound(res, oldId);
 
     const body = normalize(req.body as UpdateHostBody);
     // 用户编辑表单时 hostId 字段在 body 里。允许它和路径里的 oldId 不相等，
@@ -129,28 +140,49 @@ hostsRouter.put('/:hostId', async (req: Request, res: Response) => {
 // DELETE /api/hosts/:hostId
 hostsRouter.delete('/:hostId', async (req: Request, res: Response) => {
   const ok = await deleteHost(String(req.params.hostId));
-  if (!ok) return notFound(res, `hostId '${req.params.hostId}' not found`);
+  if (!ok) return hostNotFound(res, String(req.params.hostId));
   res.json({ removed: true });
 });
 
 // POST /api/hosts/:hostId/test
+//
+// 两种用法：
+//   1. 只传路径参数           -> 测已保存的主机
+//   2. body 带完整连接信息    -> 测未保存的（新增表单里直接点"测试"）
+//
+// 注意：必须先判断 body，路径里的 hostId 在新增场景下只是个占位符。
 hostsRouter.post('/:hostId/test', async (req: Request, res: Response) => {
-  const store = await loadStore();
-  const host = findHost(store, String(req.params.hostId));
-  if (!host) return notFound(res, `hostId '${req.params.hostId}' not found`);
+  const pathHostId = String(req.params.hostId);
 
-  // 支持测试一个未保存的连接（前端表单直传）
-  if (req.body && req.body.host) {
+  // 优先用 body 里传的连接信息（新增/编辑表单的"测试"按钮走这条路）
+  if (req.body && (req.body.host || req.body.username)) {
     try {
-      requireHostId(req.body);
+      requireConnectionFields(req.body);
     } catch (err) {
       return badRequest(res, (err as Error).message);
     }
-    const candidate = normalize(req.body);
-    const r = await pingOnce(candidate as HostConfig);
+    // body 里的敏感字段可能是 '***' 占位符（编辑已有主机且用户没改密码），
+    // 这时回退到 store 里已保存的主机补齐凭据。
+    const candidate = normalize(req.body) as HostConfig;
+    if (candidate.password === '***' || candidate.privateKey === '***' || candidate.passphrase === '***') {
+      const store = await loadStore();
+      const saved = findHost(store, pathHostId) ?? (candidate.hostId ? findHost(store, candidate.hostId) : undefined);
+      if (saved) {
+        if (candidate.password === '***') candidate.password = saved.password;
+        if (candidate.privateKey === '***') candidate.privateKey = saved.privateKey;
+        if (candidate.passphrase === '***') candidate.passphrase = saved.passphrase;
+      }
+    }
+    const r = await pingOnce(candidate);
     return res.json(r);
   }
 
+  // 没有 body，退回测已保存的主机
+  const store = await loadStore();
+  const host = findHost(store, pathHostId);
+  if (!host) {
+    return hostNotFound(res, pathHostId);
+  }
   const r = await pingOnce(host);
   res.json(r);
 });

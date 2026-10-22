@@ -45,8 +45,9 @@ export const HostForm: React.FC<Props> = ({ initial, onSaved, onCancel, hostIdFi
     setTestResult(null);
     setError(null);
     try {
-      const candidate: HostConfigDto = { ...form, hostId: form.hostId || '__unsaved__' };
-      const r = await api.testHost(candidate.hostId, candidate);
+      // hostId 可能还没填（新增场景），后端会优先用 body 里的连接信息，
+      // 所以这里直接传表单当前状态即可。
+      const r = await api.testHost(form.hostId.trim() || '_', form);
       setTestResult({
         ok: r.ok,
         msg: r.ok ? `成功 · ${r.banner ?? ''}` : `失败 · ${r.error}`,
