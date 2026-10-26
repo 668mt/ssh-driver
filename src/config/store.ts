@@ -168,6 +168,26 @@ export async function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * 在锁保护下「读 → 改 → 写」整个 store。
+ *
+ * 为什么要它：`upsertHost` / `replaceHost` / `deleteHost` 各自带锁，
+ * 但调用方常常需要「先读出来算一算，再写回去」——
+ * 如果读在锁外、写在锁内，中间就被别的进程插进来了（丢更新）。
+ * 这个函数把整个过程收进同一把锁。
+ *
+ * @param mutator 拿到当前 store（可原地修改），返回给调用方的结果。
+ *   抛异常 → 不写盘，锁自动释放。
+ */
+export async function mutateStore<T>(mutator: (store: StoreFile) => T | Promise<T>): Promise<T> {
+  return withStoreLock(async () => {
+    const store = await loadStore();
+    const result = await mutator(store);
+    await saveStore(store);
+    return result;
+  });
+}
+
+/**
  * 新增 / 更新一台主机。
  *
  * 合并语义：**只有显式提供的字段才会覆盖**（见 mergeHostConfig），

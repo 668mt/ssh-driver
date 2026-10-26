@@ -24,7 +24,7 @@ import {
   STORE_VERSION,
 } from '../../config/schema';
 import { isMasked, mergeHostConfig } from '../../config/merge';
-import { findHost, loadStore, saveStore } from '../../config/store';
+import { findHost, loadStore, mutateStore } from '../../config/store';
 
 export const ioRouter = Router();
 
@@ -67,63 +67,62 @@ ioRouter.post('/import', async (req: Request, res: Response) => {
     return res.status(400).json({ error: '请求体的 hosts 必须是数组' });
   }
 
-  const current = await loadStore();
+  // 校验在锁外做（纯内存运算，不需要保护），但「读 → 合并 → 写」
+  // 必须在同一把锁里 —— 否则另一个进程（CLI / MCP）同时改配置时，
+  // 这里算出来的 merged 会覆盖掉它的修改，凭据可能凭空消失。
+  try {
+    const result = await mutateStore(current => {
+      // 校验 + 脱敏占位符处理
+      const incoming: HostConfig[] = [];
+      for (let i = 0; i < body.hosts!.length; i += 1) {
+        validateHost(body.hosts![i], i);
+        const h = body.hosts![i] as HostConfig;
+        // 掩码占位符 ('***') 不应被持久化 —— 当作未提供
+        const sanitized: HostConfig = {
+          ...h,
+          password: isMasked(h.password) ? undefined : h.password,
+          privateKey: isMasked(h.privateKey) ? undefined : h.privateKey,
+          passphrase: isMasked(h.passphrase) ? undefined : h.passphrase,
+        };
 
-  // 校验 + 脱敏占位符处理
-  const incoming: HostConfig[] = [];
-  for (let i = 0; i < body.hosts.length; i += 1) {
-    try {
-      validateHost(body.hosts[i], i);
-      const h = body.hosts[i] as HostConfig;
-      // 掩码占位符 ('***') 不应被持久化 —— 当作未提供
-      const sanitized: HostConfig = {
-        ...h,
-        password: isMasked(h.password) ? undefined : h.password,
-        privateKey: isMasked(h.privateKey) ? undefined : h.privateKey,
-        passphrase: isMasked(h.passphrase) ? undefined : h.passphrase,
-      };
-
-      // 脱敏文件里没有真实凭据：本地已有同名主机才能补齐
-      if (!sanitized.password && !sanitized.privateKey) {
-        const existing = findHost(current, sanitized.hostId);
-        if (!existing) {
-          throw new Error(
-            `hosts[${i}] '${sanitized.hostId}' 的凭据是脱敏的（***），` +
-            `而本地没有同名主机，无法导入。请先在本机配置好这台主机，或改用不脱敏的导出文件。`,
-          );
+        // 脱敏文件里没有真实凭据：本地已有同名主机才能补齐
+        if (!sanitized.password && !sanitized.privateKey) {
+          const existing = findHost(current, sanitized.hostId);
+          if (!existing) {
+            throw new Error(
+              `hosts[${i}] '${sanitized.hostId}' 的凭据是脱敏的（***），` +
+              `而本地没有同名主机，无法导入。请先在本机配置好这台主机，或改用不脱敏的导出文件。`,
+            );
+          }
         }
+
+        incoming.push(sanitized);
       }
 
-      incoming.push(sanitized);
-    } catch (err) {
-      return res.status(400).json({ error: (err as Error).message });
-    }
-  }
+      let merged: HostConfig[];
+      if (mode === 'replace') {
+        // replace 是「整份覆盖」，但对**已存在**的主机仍然保留本地凭据 ——
+        // 否则拿一份脱敏导出做 replace 会把本地所有密码清空。
+        merged = incoming.map(h => {
+          const existing = findHost(current, h.hostId);
+          return existing ? mergeHostConfig(existing, h) : h;
+        });
+      } else {
+        // merge：按 hostId 合并，**逐字段**保留本地已有的凭据
+        const byId = new Map(current.hosts.map(h => [h.hostId.toLowerCase(), h]));
+        for (const h of incoming) {
+          const key = h.hostId.toLowerCase();
+          byId.set(key, mergeHostConfig(byId.get(key), h));
+        }
+        merged = Array.from(byId.values());
+      }
 
-  let merged: HostConfig[];
-  if (mode === 'replace') {
-    // replace 是「整份覆盖」，但对**已存在**的主机仍然保留本地凭据 ——
-    // 否则拿一份脱敏导出做 replace 会把本地所有密码清空。
-    merged = incoming.map(h => {
-      const existing = findHost(current, h.hostId);
-      return existing ? mergeHostConfig(existing, h) : h;
+      current.hosts = merged;
+      return { imported: incoming.length, total: merged.length, mode };
     });
-  } else {
-    // merge：按 hostId 合并，**逐字段**保留本地已有的凭据
-    const byId = new Map(current.hosts.map(h => [h.hostId.toLowerCase(), h]));
-    for (const h of incoming) {
-      const key = h.hostId.toLowerCase();
-      byId.set(key, mergeHostConfig(byId.get(key), h));
-    }
-    merged = Array.from(byId.values());
+
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
   }
-
-  const next: StoreFile = { version: STORE_VERSION, hosts: merged };
-  await saveStore(next);
-
-  res.json({
-    imported: incoming.length,
-    total: merged.length,
-    mode,
-  });
 });

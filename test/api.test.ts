@@ -15,7 +15,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startServer } from '../src/backend/server';
-import { loadStore, upsertHost } from '../src/config/store';
+import { loadStore, upsertHost, withStoreLock } from '../src/config/store';
 
 const TOKEN = 'test-token-0123456789';
 
@@ -183,6 +183,44 @@ describe('导入导出', () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain('脱敏');
+  });
+
+  it('导入会等配置锁，不会与其它写操作互相覆盖', async () => {
+    // 模拟「另一个进程正在改配置」：先占住锁
+    let release: (() => void) | undefined;
+    const lockHeld = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const holder = withStoreLock(async () => {
+      await lockHeld;
+    });
+    // 等锁真的被拿到
+    await new Promise(r => setTimeout(r, 50));
+
+    // 导入请求应该被阻塞（而不是绕过锁直接写）
+    let settled = false;
+    const pending = fetch(`${base}/api/io/import`, {
+      method: 'POST',
+      headers: auth(),
+      body: JSON.stringify({
+        mode: 'merge',
+        hosts: [{ hostId: 'prod-web-01', host: '10.0.1.10', username: 'deploy', password: '***' }],
+      }),
+    }).then(r => {
+      settled = true;
+      return r;
+    });
+
+    await new Promise(r => setTimeout(r, 200));
+    expect(settled).toBe(false);
+
+    release?.();
+    await holder;
+    const res = await pending;
+    expect(res.status).toBe(200);
+
+    const store = await loadStore();
+    expect(store.hosts[0].password).toBe('SECRET');
   });
 });
 

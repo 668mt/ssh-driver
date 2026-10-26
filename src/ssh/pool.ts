@@ -19,7 +19,7 @@ import { NodeSSH } from 'node-ssh';
 import type { Client } from 'ssh2';
 
 import { HostConfig } from '../config/schema';
-import { buildSshConfig } from './client';
+import { CommandTimeoutError, connectSsh } from './client';
 
 export interface PoolOptions {
   /** 空闲多久后自动断开（毫秒），默认 5 分钟 */
@@ -28,6 +28,14 @@ export interface PoolOptions {
   maxSessions?: number;
   /** 空闲清理扫描间隔（毫秒） */
   sweepIntervalMs?: number;
+  /**
+   * 同一条连接上允许并发执行多少条命令，默认 8。
+   *
+   * 为什么需要：sshd 的 MaxSessions 默认是 10（每条 TCP 连接最多 10 个
+   * session channel）。超过就直接报 `(SSH) Channel open failure: open failed`
+   * —— 是硬失败，不是排队。所以这里主动限流，把超出的请求排进队列。
+   */
+  maxConcurrentPerSession?: number;
 }
 
 interface Session {
@@ -45,6 +53,21 @@ interface Session {
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 8;
 const DEFAULT_SWEEP_INTERVAL = 30 * 1000;
+/**
+ * 单连接并发上限，默认 8。
+ *
+ * sshd 的 MaxSessions 默认 10 —— 每条 TCP 连接最多 10 个 session channel。
+ * 超过就是硬失败 `(SSH) Channel open failure: open failed`（不是排队）。
+ * 留 2 个余量给它自己用。
+ */
+const DEFAULT_MAX_CONCURRENT_PER_SESSION = 8;
+
+/** 「远端没给开 channel」后的重试等待时间（毫秒） */
+const CHANNEL_OPEN_RETRY_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /** 看起来像「连接层面的问题」的错误 —— 这些值得重连重试 */
 const CONNECTION_ERROR_HINTS = [
@@ -64,14 +87,68 @@ const CONNECTION_ERROR_HINTS = [
   'handshake failed',
 ];
 
-/** 判断一个错误是否由连接失效引起（值得重连后重试一次） */
+/**
+ * 「远端拒绝开新 channel」的错误 —— 典型是并发超过了 sshd 的 MaxSessions。
+ *
+ * 这类错误**不是**连接坏了：连接本身是好的，只是这次没排上号。
+ */
+const CHANNEL_OPEN_ERROR_HINTS = ['channel open failure', 'open failed'];
+
+/** 判断错误是不是「远端不给你开 channel」 */
+export function isChannelOpenError(err: unknown): boolean {
+  const msg = ((err as Error)?.message ?? String(err)).toLowerCase();
+  if (!msg) return false;
+  return CHANNEL_OPEN_ERROR_HINTS.some(hint => msg.includes(hint));
+}
+
+/**
+ * 判断一个错误是否由连接失效引起（值得重连后重试一次）。
+ *
+ * ⚠️ 命令超时**不算**连接错误：命令可能已经产生了副作用
+ * （写了半个文件、改了半个配置），重试等于把副作用做两遍。
+ */
 export function isConnectionError(err: unknown): boolean {
+  // 超时是「命令跑太久」，不是「连接坏了」
+  if (err instanceof CommandTimeoutError) return false;
   const msg = ((err as Error)?.message ?? String(err)).toLowerCase();
   if (!msg) return false;
   // 认证失败重试也没用，直接判定为非连接问题
   if (msg.includes('all configured authentication methods failed')) return false;
   if (msg.includes('permission denied')) return false;
   return CONNECTION_ERROR_HINTS.some(hint => msg.includes(hint));
+}
+
+/**
+ * 简单的计数信号量 —— 限制同一条连接上的并发操作数。
+ *
+ * 用它把「超出 sshd MaxSessions 的并发」从硬失败变成排队等待。
+ */
+export class Semaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(limit: number) {
+    this.available = Math.max(1, limit);
+  }
+
+  async acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available -= 1;
+      return;
+    }
+    await new Promise<void>(resolve => this.waiters.push(resolve));
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.available += 1;
+  }
+
+  /** 当前可用的名额（测试用） */
+  get availablePermits(): number {
+    return this.available;
+  }
 }
 
 export class SshSessionPool {
@@ -81,12 +158,33 @@ export class SshSessionPool {
   private readonly idleTimeoutMs: number;
   private readonly maxSessions: number;
   private readonly sweepIntervalMs: number;
+  private readonly maxConcurrentPerSession: number;
+  /**
+   * 每台主机一个并发闸门。
+   *
+   * sshd 的 MaxSessions 是**每条 TCP 连接**的限制，而池里每台主机只有
+   * 一条连接 —— 所以闸门也必须按主机分，否则多主机场景下会互相拖累。
+   */
+  private readonly gates = new Map<string, Semaphore>();
   private sweeper?: NodeJS.Timeout;
 
   constructor(opts: PoolOptions = {}) {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT;
     this.maxSessions = opts.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.sweepIntervalMs = opts.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL;
+    this.maxConcurrentPerSession =
+      opts.maxConcurrentPerSession ?? DEFAULT_MAX_CONCURRENT_PER_SESSION;
+  }
+
+  /** 取（并按需创建）某台主机的并发闸门 */
+  private gate(hostId: string): Semaphore {
+    const key = this.key(hostId);
+    let g = this.gates.get(key);
+    if (!g) {
+      g = new Semaphore(this.maxConcurrentPerSession);
+      this.gates.set(key, g);
+    }
+    return g;
   }
 
   private key(hostId: string): string {
@@ -162,8 +260,8 @@ export class SshSessionPool {
   private async createSession(host: HostConfig): Promise<Session> {
     await this.evictIfNeeded(host.hostId);
 
-    const ssh = new NodeSSH();
-    await ssh.connect(buildSshConfig(host));
+    // connectSsh 已经挂好了兜底的 error 监听器（见 client.ts 的说明）
+    const ssh = await connectSsh(host);
     const client = ssh.connection ?? null;
 
     const session: Session = {
@@ -211,8 +309,13 @@ export class SshSessionPool {
   /**
    * 在一条（最好是复用的）连接上执行操作。
    *
-   * 连接层面的失败会自动重建连接并重试一次 —— 这解决了「远端 idle
-   * 超时把连接掐了，但本地池子还以为它是活的」这个经典问题。
+   * 三层保护：
+   *   1. **并发闸门**：同一时刻最多 N 条命令在跑（默认 8，sshd MaxSessions 是 10）。
+   *      超出排队，而不是硬失败 `(SSH) Channel open failure: open failed`。
+   *   2. **连接级重试**：连接层面的失败会自动重建连接并重试一次 ——
+   *      这解决了「远端 idle 超时把连接掐了，但本地池子还以为它是活的」。
+   *   3. **命令超时**：由 client 层负责终止远端进程，且**不重试**
+   *      （命令可能已经产生副作用，重试等于做两遍）。
    */
   async withSession<T>(
     host: HostConfig,
@@ -220,30 +323,53 @@ export class SshSessionPool {
     opts: { retry?: boolean } = {},
   ): Promise<T> {
     const retry = opts.retry !== false;
-    const session = await this.acquire(host);
+    // 先占闸门位，再拿连接 —— 顺序反了会出现「拿到了连接却在排队」，
+    // 导致连接被 sweeper 当成空闲回收掉。
+    const gate = this.gate(host.hostId);
+    await gate.acquire();
     try {
-      const out = await fn(session);
-      session.lastUsedAt = Date.now();
-      return out;
-    } catch (err) {
-      session.lastUsedAt = Date.now();
-      const canRetry = retry && session.reused && isConnectionError(err);
-      if (!canRetry) {
-        // 连接本身坏了就摘掉；业务错误（命令失败）保留连接
-        if (isConnectionError(err)) this.disposeSession(session);
-        throw err;
-      }
-      this.disposeSession(session);
-      const fresh = await this.acquire(host);
+      const session = await this.acquire(host);
       try {
-        const out = await fn(fresh);
-        fresh.lastUsedAt = Date.now();
+        const out = await fn(session);
+        session.lastUsedAt = Date.now();
         return out;
-      } catch (err2) {
-        fresh.lastUsedAt = Date.now();
-        if (isConnectionError(err2)) this.disposeSession(fresh);
-        throw err2;
+      } catch (err) {
+        session.lastUsedAt = Date.now();
+        // 「远端不给你开 channel」不是连接坏了 —— 连接是好的，
+        // 只是这次没排上号。等一下重试，而不是重建连接。
+        if (isChannelOpenError(err)) {
+          await sleep(CHANNEL_OPEN_RETRY_DELAY_MS);
+          const retrySession = await this.acquire(host);
+          try {
+            const out = await fn(retrySession);
+            retrySession.lastUsedAt = Date.now();
+            return out;
+          } catch (err2) {
+            retrySession.lastUsedAt = Date.now();
+            if (isConnectionError(err2)) this.disposeSession(retrySession);
+            throw err2;
+          }
+        }
+        const canRetry = retry && session.reused && isConnectionError(err);
+        if (!canRetry) {
+          // 连接本身坏了就摘掉；业务错误（命令失败 / 超时）保留连接
+          if (isConnectionError(err)) this.disposeSession(session);
+          throw err;
+        }
+        this.disposeSession(session);
+        const fresh = await this.acquire(host);
+        try {
+          const out = await fn(fresh);
+          fresh.lastUsedAt = Date.now();
+          return out;
+        } catch (err2) {
+          fresh.lastUsedAt = Date.now();
+          if (isConnectionError(err2)) this.disposeSession(fresh);
+          throw err2;
+        }
       }
+    } finally {
+      gate.release();
     }
   }
 
@@ -295,6 +421,8 @@ export class SshSessionPool {
     count: number;
     max: number;
     idleTimeoutMs: number;
+    /** 单台主机上的并发上限（sshd MaxSessions 通常是 10，这里留了余量） */
+    maxConcurrentPerSession: number;
     sessions: Array<{
       hostId: string;
       ageMs: number;
@@ -308,6 +436,7 @@ export class SshSessionPool {
       count: this.sessions.size,
       max: this.maxSessions,
       idleTimeoutMs: this.idleTimeoutMs,
+      maxConcurrentPerSession: this.maxConcurrentPerSession,
       sessions: Array.from(this.sessions.values()).map(s => ({
         hostId: s.hostId,
         ageMs: now - s.createdAt,
