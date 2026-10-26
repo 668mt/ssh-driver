@@ -139,6 +139,7 @@ ssh-driver connect <hostId>
 ssh-driver exec <hostId> "<cmd>" [--json] [--timeout <ms>]
 ssh-driver exec <hostId> --script <file> [--arg <v>]... [--interpreter <cmd>]
 ssh-driver history [--limit <n>] [--host <id>] [--failed] [--json]
+                  # --limit 0 = 全部
 ssh-driver console [--port <n>] [--host <addr>] [--dev] [--no-open] [--token <t>]
 ssh-driver mcp
 ```
@@ -305,6 +306,15 @@ $ ssh-driver history --limit 5
 记录内容：时间、来源（`cli` / `api` / `mcp`）、主机、操作类型、命令、退出码、耗时、是否成功。
 
 命令里的密码会**自动脱敏**（`--password=` / `-pXXX` / `sshpass -p` / `token=` / `secret=` 等）。
+
+```bash
+ssh-driver history                    # 最近 50 条
+ssh-driver history --limit 0          # 全部
+ssh-driver history --host 8500        # 只看某台主机
+ssh-driver history --failed           # 只看失败的
+```
+
+网页控制台的「远程执行」页下方同样有一张记录表：默认 50 条、可「加载更多」、可切「只看当前主机」。
 
 MCP 工具 `get_history` 让 AI 自己也能回溯「之前在这台机器上跑过什么」。
 

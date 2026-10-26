@@ -78,7 +78,7 @@ describe('appendAudit / readAudit', () => {
       ok: false,
     });
 
-    const entries = await readAudit();
+    const { entries } = await readAudit();
     expect(entries).toHaveLength(2);
     expect(entries[0].hostId).toBe('b');
     expect(entries[1].hostId).toBe('a');
@@ -100,7 +100,7 @@ describe('appendAudit / readAudit', () => {
       ok: true,
     });
 
-    const entries = await readAudit({ hostId: 'A' });
+    const { entries } = await readAudit({ hostId: 'A' });
     expect(entries).toHaveLength(1);
     expect(entries[0].hostId).toBe('a');
   });
@@ -122,12 +122,12 @@ describe('appendAudit / readAudit', () => {
       error: 'boom',
     });
 
-    const entries = await readAudit({ failedOnly: true });
+    const { entries } = await readAudit({ failedOnly: true });
     expect(entries).toHaveLength(1);
     expect(entries[0].error).toBe('boom');
   });
 
-  it('limit 生效', async () => {
+  it('limit 生效，且 total 统计的是全部匹配条数', async () => {
     for (let i = 0; i < 10; i += 1) {
       await appendAudit({
         ts: `2026-10-26T10:0${i}:00.000Z`,
@@ -137,10 +137,28 @@ describe('appendAudit / readAudit', () => {
         ok: true,
       });
     }
-    expect(await readAudit({ limit: 3 })).toHaveLength(3);
+    const { entries, total } = await readAudit({ limit: 3 });
+    expect(entries).toHaveLength(3);
+    expect(total).toBe(10);
+  });
+
+  it('limit = 0 表示不限条数', async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await appendAudit({
+        ts: `2026-10-26T10:0${i}:00.000Z`,
+        source: 'cli',
+        action: 'exec',
+        hostId: 'a',
+        ok: true,
+      });
+    }
+    const { entries } = await readAudit({ limit: 0 });
+    expect(entries).toHaveLength(5);
   });
 
   it('日志文件不存在时返回空数组', async () => {
-    expect(await readAudit()).toEqual([]);
+    const res = await readAudit();
+    expect(res.entries).toEqual([]);
+    expect(res.total).toBe(0);
   });
 });

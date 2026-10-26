@@ -104,6 +104,11 @@ export interface Strings {
   execDone: (host: string, code: number) => string;
   execFail: string;
   execHistory: string;
+  execHistoryCount: (shown: number, total: number) => string;
+  execHistoryScope: string;
+  execHistoryScopeTip: string;
+  execHistoryMore: string;
+  execHistoryEmpty: string;
 }
 
 const zhCN: Strings = {
@@ -202,6 +207,12 @@ const zhCN: Strings = {
   execDone: (host, code) => `${host} 执行完成 · exit ${code}`,
   execFail: '执行失败',
   execHistory: '最近执行记录',
+  execHistoryCount: (shown, total) =>
+    total > shown ? `显示 ${shown} / 共 ${total} 条` : `共 ${shown} 条`,
+  execHistoryScope: '只看当前主机',
+  execHistoryScopeTip: '勾选后只显示当前选中主机的执行记录',
+  execHistoryMore: '加载更多',
+  execHistoryEmpty: '暂无执行记录',
 };
 
 export default zhCN;

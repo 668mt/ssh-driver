@@ -240,6 +240,7 @@ curl -X POST http://127.0.0.1:7843/api/io/import \
 ```bash
 ssh-driver history --limit 20
 ssh-driver history --host prod-web-01 --failed
+ssh-driver history --limit 0        # 全部
 ```
 
 ## 注意事项（AI 必读）

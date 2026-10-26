@@ -14,6 +14,7 @@ import { runConsole } from './commands/console';
 import { runMcp } from './commands/mcp';
 import { historyRun } from './commands/history';
 import { logger } from './utils/logger';
+import { parseIntArg } from './utils/parse';
 
 /**
  * 从 package.json 读版本号 —— 单一事实来源。
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
     .command('exec <hostId> [command...]')
     .description('在已保存的主机上执行命令，或用 --script 执行本地脚本文件')
     .option('--json', '以 JSON 输出 {stdout, stderr, code}', false)
-    .option('--timeout <ms>', '命令级超时（毫秒）', parseInt)
+    .option('--timeout <ms>', '命令级超时（毫秒）', parseIntArg)
     .option('--script <path>', '执行本地脚本文件（"-" 表示从标准输入读取）')
     .option('--arg <value>', '传给脚本的位置参数 $1 $2 ...（可重复）', collect, [])
     .option('--interpreter <cmd>', '脚本解释器（默认按 shebang 推断，没有则用 bash）')
@@ -119,7 +120,7 @@ async function main(): Promise<void> {
   program
     .command('history')
     .description('查看操作审计日志（谁在什么时候跑了什么命令）')
-    .option('-n, --limit <count>', '最多显示多少条', parseInt, 20)
+    .option('-n, --limit <count>', '最多显示多少条（0 = 全部）', parseIntArg, 50)
     .option('--host <hostId>', '只看某台主机')
     .option('--failed', '只看失败的记录', false)
     .option('--json', '以 JSON 输出', false)
@@ -142,7 +143,7 @@ async function main(): Promise<void> {
   program
     .command('console')
     .description('打开本地网页控制台管理连接')
-    .option('-p, --port <n>', '覆盖 HTTP 端口（默认 7843）', parseInt)
+    .option('-p, --port <n>', '覆盖 HTTP 端口（默认 7843）', parseIntArg)
     .option('--host <addr>', '绑定地址（默认 127.0.0.1）')
     .option('--dev', '同时启动 vite dev server 便于调试前端', false)
     .option('--no-open', '不自动打开浏览器')

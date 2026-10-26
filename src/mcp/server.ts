@@ -419,12 +419,12 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
     },
     async ({ limit, hostId, failedOnly }) => {
       try {
-        const entries = await readAudit({
+        const { entries, total } = await readAudit({
           limit: limit ?? 20,
           hostId,
           failedOnly: failedOnly === true,
         });
-        return ok({ count: entries.length, entries });
+        return ok({ count: entries.length, total, entries });
       } catch (err) {
         return fail(`读取审计日志失败：${(err as Error).message}`);
       }

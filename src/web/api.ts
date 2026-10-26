@@ -102,8 +102,8 @@ export const api = {
     request<{ imported: number; total: number; mode: 'replace' | 'merge' }>('POST', '/api/io/import', { hosts, mode }),
 
   /** 操作审计日志 */
-  history: (limit = 20, hostId?: string) =>
-    request<{ count: number; file: string; entries: AuditEntryDto[] }>(
+  history: (limit = 50, hostId?: string) =>
+    request<{ count: number; total: number; file: string; entries: AuditEntryDto[] }>(
       'GET',
       `/api/history?limit=${limit}${hostId ? `&hostId=${enc(hostId)}` : ''}`,
     ),

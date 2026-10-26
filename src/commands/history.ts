@@ -53,8 +53,9 @@ function failureReason(entry: AuditEntry): string {
 }
 
 export async function historyRun(opts: HistoryOptions = {}): Promise<void> {
-  const entries = await readAudit({
-    limit: opts.limit ?? 20,
+  const limit = Number.isFinite(opts.limit) ? (opts.limit as number) : 50;
+  const { entries, total } = await readAudit({
+    limit,
     hostId: opts.hostId,
     failedOnly: opts.failedOnly,
   });
@@ -80,5 +81,9 @@ export async function historyRun(opts: HistoryOptions = {}): Promise<void> {
       `${formatTime(e.ts)}  ${status}  ${host}  ${src}  ${e.action.padEnd(11)}${code.padEnd(10)}${dur}  ${detail}`,
     );
   }
-  console.log(`\n共 ${entries.length} 条 · 日志文件：${getHistoryFile()}`);
+  console.log(
+    `\n显示 ${entries.length} 条` +
+      (total > entries.length ? `（共 ${total} 条，用 --limit 0 查看全部）` : '') +
+      ` · 日志文件：${getHistoryFile()}`,
+  );
 }

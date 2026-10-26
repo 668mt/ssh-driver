@@ -121,29 +121,44 @@ export interface AuditQuery {
   action?: AuditAction;
   /** 只看失败 */
   failedOnly?: boolean;
-  /** 最多返回条数（从最新往回取） */
+  /** 最多返回条数（从最新往回取）；<= 0 表示不限 */
   limit?: number;
 }
 
+export interface AuditResult {
+  /** 记录（按时间倒序，最新在前） */
+  entries: AuditEntry[];
+  /** 符合过滤条件的总条数（不受 limit 影响） */
+  total: number;
+}
+
+/** 默认返回条数 */
+const DEFAULT_LIMIT = 50;
+
 /**
  * 读取审计记录，按时间倒序返回（最新在前）。
+ *
+ * limit <= 0 表示「全部返回」。同时会统计符合过滤条件的总条数，
+ * 方便界面显示「显示 50 / 共 137 条」。
  */
-export async function readAudit(query: AuditQuery = {}): Promise<AuditEntry[]> {
+export async function readAudit(query: AuditQuery = {}): Promise<AuditResult> {
   const file = getHistoryFile();
   let raw: string;
   try {
     raw = await fs.readFile(file, 'utf-8');
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { entries: [], total: 0 };
     throw err;
   }
 
-  const limit = query.limit && query.limit > 0 ? query.limit : 50;
-  const out: AuditEntry[] = [];
-  const lines = raw.split('\n');
+  const limit = query.limit === undefined ? DEFAULT_LIMIT : query.limit;
+  const unlimited = limit <= 0;
+  const entries: AuditEntry[] = [];
+  let total = 0;
 
-  // 从后往前扫，命中 limit 条就停 —— 大文件也能快速返回
-  for (let i = lines.length - 1; i >= 0 && out.length < limit; i -= 1) {
+  const lines = raw.split('\n');
+  // 从后往前扫，收集最近的 limit 条；同时统计总条数
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i]?.trim();
     if (!line) continue;
     let entry: AuditEntry;
@@ -155,7 +170,8 @@ export async function readAudit(query: AuditQuery = {}): Promise<AuditEntry[]> {
     if (query.hostId && entry.hostId?.toLowerCase() !== query.hostId.toLowerCase()) continue;
     if (query.action && entry.action !== query.action) continue;
     if (query.failedOnly && entry.ok) continue;
-    out.push(entry);
+    total += 1;
+    if (unlimited || entries.length < limit) entries.push(entry);
   }
-  return out;
+  return { entries, total };
 }

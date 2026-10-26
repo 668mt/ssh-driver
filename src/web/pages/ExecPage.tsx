@@ -40,6 +40,11 @@ export const ExecPage: React.FC<Props> = ({ notify }) => {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  /** 审计记录拉取条数，「加载更多」时递增 */
+  const [historyLimit, setHistoryLimit] = useState(50);
+  /** 记录范围：全部主机 / 仅当前主机 */
+  const [historyScope, setHistoryScope] = useState<'all' | 'host'>('all');
+  const [historyTotal, setHistoryTotal] = useState(0);
 
   const loadHosts = useCallback(async () => {
     try {
@@ -53,12 +58,16 @@ export const ExecPage: React.FC<Props> = ({ notify }) => {
 
   const loadHistory = useCallback(async () => {
     try {
-      const res = await api.history(10, hostId || undefined);
+      const res = await api.history(
+        historyLimit,
+        historyScope === 'host' ? hostId || undefined : undefined,
+      );
       setHistory(res.entries ?? []);
+      setHistoryTotal(res.count ?? res.entries?.length ?? 0);
     } catch {
       /* 历史加载失败不影响主流程 */
     }
-  }, [hostId]);
+  }, [hostId, historyLimit, historyScope]);
 
   useEffect(() => {
     void loadHosts();
@@ -219,26 +228,62 @@ export const ExecPage: React.FC<Props> = ({ notify }) => {
         </div>
       )}
 
-      {history.length > 0 && (
-        <div className="exec-history">
-          <h3>{t('execHistory')}</h3>
-          <table>
-            <tbody>
-              {history.map((h, i) => (
-                <tr key={`${h.ts}-${i}`}>
-                  <td className="ts">{h.ts.replace('T', ' ').slice(0, 19)}</td>
-                  <td className={h.ok ? 'ok' : 'fail'}>{h.ok ? 'OK' : 'FAIL'}</td>
-                  <td>{h.hostId}</td>
-                  <td className="cmd" title={h.command ?? h.script ?? ''}>
-                    {h.command ?? h.script ?? h.action}
-                  </td>
-                  <td className="muted">{h.durationMs != null ? `${h.durationMs}ms` : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="exec-history">
+        <div className="exec-history-head">
+          <h3>
+            {t('execHistory')}
+            <span className="muted">
+              {' '}
+              {t('execHistoryCount', history.length, historyTotal)}
+            </span>
+          </h3>
+          <div className="exec-history-actions">
+            <label className="exec-inline" title={t('execHistoryScopeTip')}>
+              <input
+                type="checkbox"
+                checked={historyScope === 'host'}
+                onChange={e => setHistoryScope(e.target.checked ? 'host' : 'all')}
+              />
+              {t('execHistoryScope')}
+            </label>
+            <button
+              className="btn"
+              onClick={() => setHistoryLimit(l => l + 50)}
+              disabled={history.length < historyLimit}
+            >
+              {t('execHistoryMore')}
+            </button>
+            <button className="btn" onClick={() => void loadHistory()}>
+              {t('refresh')}
+            </button>
+          </div>
         </div>
-      )}
+
+        {history.length === 0 ? (
+          <div className="muted">{t('execHistoryEmpty')}</div>
+        ) : (
+          <div className="exec-history-scroll">
+            <table>
+              <tbody>
+                {history.map((h, i) => (
+                  <tr key={`${h.ts}-${i}`}>
+                    <td className="ts">{h.ts.replace('T', ' ').slice(0, 19)}</td>
+                    <td className={h.ok ? 'ok' : 'fail'}>{h.ok ? 'OK' : 'FAIL'}</td>
+                    <td className="host">{h.hostId}</td>
+                    <td className="cmd" title={h.command ?? h.script ?? h.error ?? ''}>
+                      {h.command ?? h.script ?? h.action}
+                      {h.error && <div className="err">{h.error}</div>}
+                    </td>
+                    <td className="muted dur">
+                      {h.durationMs != null ? `${h.durationMs}ms` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

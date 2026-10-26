@@ -523,9 +523,27 @@ button.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
   box-shadow: var(--shadow);
 }
 .exec-history h3 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 13px;
   color: var(--text);
+}
+.exec-history-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.exec-history-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.exec-history-scroll {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .exec-history table {
   width: 100%;
@@ -542,13 +560,26 @@ button.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
   white-space: nowrap;
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
 }
+.exec-history td.host {
+  white-space: nowrap;
+  color: var(--accent-2);
+}
+.exec-history td.dur {
+  white-space: nowrap;
+  text-align: right;
+}
 .exec-history td.ok { color: var(--accent); }
 .exec-history td.fail { color: var(--danger); }
 .exec-history td.cmd {
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 命令完整换行显示，不再截断成一行省略号 */
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-width: 240px;
+}
+.exec-history td.cmd .err {
+  color: var(--danger);
+  margin-top: 2px;
+  font-size: 11px;
 }
 .muted { color: var(--muted); }

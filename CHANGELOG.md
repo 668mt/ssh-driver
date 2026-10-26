@@ -23,6 +23,14 @@
 
 ### 新增
 
+- **历史记录展示增强**
+  - 网页控制台「最近执行记录」：默认 50 条（原 10 条），可「加载更多」每次 +50
+  - 可切换「只看当前主机 / 全部主机」
+  - 命令完整换行显示，不再截断成一行省略号；失败记录直接显示错误原因
+  - 表格加了滚动容器（最高 460px），记录再多也不会把页面撑爆
+  - 标题显示「显示 N / 共 M 条」
+  - `ssh-driver history` 默认 50 条，`--limit 0` 查看全部
+  - `GET /api/history` 返回 `total`（符合过滤条件的总条数）
 - **MCP Server 模式** — `ssh-driver mcp` 以 MCP (stdio) 暴露 10 个工具
   - `list_hosts` / `test_host` / `exec_command` / `exec_script`
   - `list_files` / `read_file` / `write_file`（SFTP）
@@ -53,6 +61,11 @@
 
 ### 修复
 
+- **`--limit` / `--timeout` 之前是静默失效的** 🔴
+  - 根因：commander 在选项**带默认值**时会把默认值作为第二个参数传给转换函数，
+    而 `parseInt` 的第二个参数是**进制** → `parseInt('6', 50)` = `NaN`
+  - 后果：`ssh-driver history --limit 6` 什么都读不出来；`exec --timeout 2000` 完全不起作用
+  - 现在统一用 `parseIntArg`（显式 10 进制），并对 NaN 做兜底
 - **`config add` 重复执行不再抹掉已保存的密码 / 私钥** 🔴
   - 根因：用 `{...existing, ...patch}` 展开合并时，**显式存在的 `undefined` 键也会覆盖原值**
   - 现在所有合并统一走 `config/merge.ts`：`undefined` = 没提供、`'***'` = 掩码占位符、`''` = 显式清空

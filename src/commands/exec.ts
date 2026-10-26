@@ -91,6 +91,8 @@ export async function execRun(
 ): Promise<void> {
   const host = await resolveHost(hostId);
   const started = Date.now();
+  // NaN 的超时时间会让「有没有超时」的判断恒为 false —— 静默失效，必须挡掉
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined;
 
   const isScript = typeof opts.script === 'string' && opts.script !== '';
   const action = isScript ? 'exec-script' : 'exec';
@@ -104,7 +106,7 @@ export async function execRun(
       const result = await execScript(host, loaded.content, {
         interpreter: opts.interpreter,
         args: opts.args,
-        timeoutMs: opts.timeoutMs,
+        timeoutMs,
       });
 
       await appendAudit({
@@ -138,7 +140,7 @@ export async function execRun(
       return;
     }
 
-    const result = await execOn(host, command, { timeoutMs: opts.timeoutMs });
+    const result = await execOn(host, command, { timeoutMs });
 
     await appendAudit({
       ts: new Date().toISOString(),
