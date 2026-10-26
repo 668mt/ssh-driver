@@ -22,6 +22,8 @@ export interface HostConfig {
   privateKey?: string;
   /** 私钥口令（如果私钥加密了） */
   passphrase?: string;
+  /** 主机密钥指纹（如 sha256:xxxx），配置后强制校验，防中间人 */
+  hostHash?: string;
   /** 连接超时（毫秒），默认 15000 */
   readyTimeout?: number;
   /** 标签，便于分组 */

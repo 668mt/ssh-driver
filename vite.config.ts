@@ -16,7 +16,18 @@ export default defineConfig({
     port: 5174,
     strictPort: false,
     proxy: {
-      '/api': { target: BACKEND, changeOrigin: true },
+      '/api': {
+        target: BACKEND,
+        changeOrigin: true,
+        // dev 模式下前端跑在 vite 上，没有服务端注入的令牌 meta，
+        // 由代理统一把令牌塞进请求头。
+        configure: proxy => {
+          proxy.on('proxyReq', (proxyReq) => {
+            const token = process.env.SSH_DRIVER_TOKEN;
+            if (token) proxyReq.setHeader('x-ssh-driver-token', token);
+          });
+        },
+      },
     },
   },
 });

@@ -4,10 +4,14 @@
  * 用例：
  *   ssh-driver config add     --hostId dev --host 1.2.3.4 --username root --password xxx
  *   ssh-driver config list
+ *   ssh-driver config list --json
  *   ssh-driver config show    dev
  *   ssh-driver config update  dev --port 2222
  *   ssh-driver config remove  dev
  *   ssh-driver config test    dev
+ *
+ * 合并语义（重要）：`config add` 重复执行**不会**覆盖已保存的密码 / 私钥。
+ * 没传的字段一律保留原值，详见 config/merge.ts。
  * @Author Martin
  * @Date 2026/10/19
  */
@@ -15,7 +19,7 @@
 import { Command } from 'commander';
 
 import { HostConfig } from '../config/schema';
-import { deleteHost, findHost, loadStore, saveStore, upsertHost } from '../config/store';
+import { deleteHost, findHost, loadStore, upsertHost } from '../config/store';
 import { logger } from '../utils/logger';
 import { pingOnce } from '../ssh/client';
 
@@ -23,7 +27,17 @@ function mask(v?: string): string {
   return v ? '***' : '';
 }
 
-async function loadHostOrThrow(hostId: string) {
+/** 对外展示时的脱敏视图（CLI 只给人看，不该回显凭据） */
+function maskedView(h: HostConfig): Record<string, unknown> {
+  return {
+    ...h,
+    password: mask(h.password),
+    privateKey: h.privateKey ? '***' : undefined,
+    passphrase: mask(h.passphrase),
+  };
+}
+
+async function loadHostOrThrow(hostId: string): Promise<HostConfig> {
   const store = await loadStore();
   const host = findHost(store, hostId);
   if (!host) {
@@ -33,44 +47,41 @@ async function loadHostOrThrow(hostId: string) {
 }
 
 function printHost(h: HostConfig): void {
-  console.log(JSON.stringify(
-    {
-      ...h,
-      password: mask(h.password),
-      privateKey: h.privateKey ? '***' : undefined,
-      passphrase: mask(h.passphrase),
-    },
-    null,
-    2,
-  ));
+  console.log(JSON.stringify(maskedView(h), null, 2));
 }
 
 export async function configAdd(opts: {
   hostId: string;
   host: string;
-  port?: number;
+  port?: string | number;
   username: string;
   password?: string;
   privateKey?: string;
   passphrase?: string;
   description?: string;
-  readyTimeout?: number;
+  readyTimeout?: string | number;
   tags?: string;
   test?: boolean;
 }): Promise<void> {
   const host: HostConfig = {
     hostId: opts.hostId,
     host: opts.host,
-    port: opts.port,
+    // commander 不带 parser 时给的是字符串 —— 必须显式转成数字，
+    // 否则 config.json 里会存下 "2222" 这种字符串端口
+    port: opts.port != null && opts.port !== '' ? Number(opts.port) : undefined,
     username: opts.username,
     password: opts.password,
     privateKey: opts.privateKey,
     passphrase: opts.passphrase,
     description: opts.description,
-    readyTimeout: opts.readyTimeout ? Number(opts.readyTimeout) : undefined,
+    readyTimeout:
+      opts.readyTimeout != null && opts.readyTimeout !== ''
+        ? Number(opts.readyTimeout)
+        : undefined,
     tags: opts.tags ? opts.tags.split(',').map(s => s.trim()).filter(Boolean) : undefined,
   };
 
+  // 合并语义：没传的字段保留已保存的值（不会把密码抹掉）
   const { created } = await upsertHost(host);
   logger.info(created ? `已添加主机 '${host.hostId}'` : `已更新主机 '${host.hostId}'`);
 
@@ -82,12 +93,22 @@ export async function configAdd(opts: {
   }
 }
 
-export async function configList(): Promise<void> {
+export async function configList(opts: { json?: boolean } = {}): Promise<void> {
   const store = await loadStore();
   if (store.hosts.length === 0) {
+    if (opts.json) {
+      console.log(JSON.stringify([]));
+      return;
+    }
     logger.info('还没有配置任何主机，使用 `ssh-driver config add ...` 添加。');
     return;
   }
+
+  if (opts.json) {
+    console.log(JSON.stringify(store.hosts.map(maskedView), null, 2));
+    return;
+  }
+
   for (const h of store.hosts) {
     console.log(
       `${h.hostId}\t${h.username}@${h.host}:${h.port ?? 22}` +
@@ -128,37 +149,38 @@ export async function configTest(hostId: string): Promise<void> {
 }
 
 export function registerConfigCommand(program: Command): void {
-  const cmd = program.command('config').description('Manage saved SSH host configs');
+  const cmd = program.command('config').description('管理已保存的 SSH 主机配置');
 
   cmd
     .command('add')
-    .requiredOption('--hostId <id>', 'unique id for this host')
-    .requiredOption('--host <host>', 'hostname or IP')
-    .requiredOption('--username <user>', 'SSH user')
-    .option('--port <port>', 'SSH port')
-    .option('--password <pwd>', 'password (prefer --privateKey)')
-    .option('--privateKey <path>', 'path to private key file')
-    .option('--passphrase <pp>', 'passphrase for the private key')
-    .option('--description <desc>', 'human readable description')
-    .option('--readyTimeout <ms>', 'connection ready timeout in ms')
-    .option('--tags <tags>', 'comma separated tags')
-    .option('--test', 'test the connection after saving', false)
+    .requiredOption('--hostId <id>', '唯一标识')
+    .requiredOption('--host <host>', '主机名或 IP')
+    .requiredOption('--username <user>', 'SSH 用户名')
+    .option('--port <port>', 'SSH 端口（默认 22）')
+    .option('--password <pwd>', '密码（推荐用 --privateKey）')
+    .option('--privateKey <path>', '私钥文件路径')
+    .option('--passphrase <pp>', '私钥口令')
+    .option('--description <desc>', '人类可读描述')
+    .option('--readyTimeout <ms>', '连接就绪超时（毫秒）')
+    .option('--tags <tags>', '逗号分隔的标签')
+    .option('--test', '保存后立即测试连通性', false)
     .action(async (opts) => configAdd(opts));
 
   cmd
     .command('list')
     .alias('ls')
-    .description('List saved hosts')
-    .action(async () => configList());
+    .description('列出已保存的主机')
+    .option('--json', '以 JSON 输出（凭据脱敏）', false)
+    .action(async (opts: { json?: boolean }) => configList(opts));
 
   cmd
     .command('show <hostId>')
-    .description('Show one host config (secrets masked)')
+    .description('查看某台主机的配置（敏感字段脱敏）')
     .action(async (hostId: string) => configShow(hostId));
 
   cmd
     .command('update <hostId>')
-    .description('Update fields on a saved host')
+    .description('更新已保存主机的字段')
     .option('--host <host>')
     .option('--port <port>')
     .option('--username <user>')
@@ -183,11 +205,11 @@ export function registerConfigCommand(program: Command): void {
   cmd
     .command('remove <hostId>')
     .alias('rm')
-    .description('Remove a saved host')
+    .description('删除已保存的主机')
     .action(async (hostId: string) => configRemove(hostId));
 
   cmd
     .command('test <hostId>')
-    .description('Test SSH connectivity to a saved host')
+    .description('测试某台主机的 SSH 连通性')
     .action(async (hostId: string) => configTest(hostId));
 }

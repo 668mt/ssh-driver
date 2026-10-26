@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 
 import { HostsPage } from './pages/HostsPage';
 import { ImportExportPage } from './pages/ImportExportPage';
+import { ExecPage } from './pages/ExecPage';
 import { api } from './api';
 import { t } from './i18n';
 
-type Tab = 'hosts' | 'io';
+type Tab = 'hosts' | 'io' | 'exec';
 
 interface Toast {
   id: number;
@@ -53,6 +54,12 @@ export const App: React.FC = () => {
             {t('tabHosts')}
           </button>
           <button
+            className={tab === 'exec' ? 'active' : ''}
+            onClick={() => setTab('exec')}
+          >
+            {t('tabExec')}
+          </button>
+          <button
             className={tab === 'io' ? 'active' : ''}
             onClick={() => setTab('io')}
           >
@@ -73,10 +80,16 @@ export const App: React.FC = () => {
 
       <main className="main">
         <h2 className="section-title">
-          {tab === 'hosts' ? t('sectionHosts') : t('sectionIO')}
+          {tab === 'hosts'
+            ? t('sectionHosts')
+            : tab === 'exec'
+              ? t('sectionExec')
+              : t('sectionIO')}
         </h2>
         {tab === 'hosts' ? (
           <HostsPage notify={notify} />
+        ) : tab === 'exec' ? (
+          <ExecPage notify={notify} />
         ) : (
           <ImportExportPage notify={notify} onChanged={() => setTab('hosts')} />
         )}

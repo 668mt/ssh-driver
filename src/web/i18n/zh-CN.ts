@@ -9,6 +9,7 @@ export interface Strings {
   appTitle: string;
   tabHosts: string;
   tabImportExport: string;
+  tabExec: string;
 
   // 公共
   save: string;
@@ -81,11 +82,34 @@ export interface Strings {
   importRun: string;
   importInvalidJson: (msg: string) => string;
   importOk: (n: number, total: number, mode: string) => string;
+
+  // Exec 页
+  sectionExec: string;
+  execHost: string;
+  execNoHosts: string;
+  execNoHost: string;
+  execMode: string;
+  execModeCommand: string;
+  execModeScript: string;
+  execTimeout: string;
+  execCommand: string;
+  execCommandPh: string;
+  execNoCommand: string;
+  execScript: string;
+  execNoScript: string;
+  execInterpreter: string;
+  execArgs: string;
+  execRun: string;
+  execRunning: string;
+  execDone: (host: string, code: number) => string;
+  execFail: string;
+  execHistory: string;
 }
 
 const zhCN: Strings = {
   appTitle: 'ssh-driver',
   tabHosts: '主机列表',
+  tabExec: '远程执行',
   tabImportExport: '导入 / 导出',
 
   save: '保存',
@@ -157,6 +181,27 @@ const zhCN: Strings = {
   importRun: '导入',
   importInvalidJson: (msg) => `JSON 解析失败 · ${msg}`,
   importOk: (n, total, mode) => `导入完成 · 新增 ${n} 条，当前共 ${total} 条 · 模式 ${mode}`,
+
+  sectionExec: '远程执行',
+  execHost: '目标主机',
+  execNoHosts: '（还没有可用主机）',
+  execNoHost: '请先选择目标主机',
+  execMode: '执行方式',
+  execModeCommand: '单条命令',
+  execModeScript: '脚本',
+  execTimeout: '超时(ms)',
+  execCommand: '命令',
+  execCommandPh: '例如：docker ps -a',
+  execNoCommand: '请输入要执行的命令',
+  execScript: '脚本内容',
+  execNoScript: '请输入脚本内容',
+  execInterpreter: '解释器（留空按 shebang 推断）',
+  execArgs: '脚本参数',
+  execRun: '执行',
+  execRunning: '执行中…',
+  execDone: (host, code) => `${host} 执行完成 · exit ${code}`,
+  execFail: '执行失败',
+  execHistory: '最近执行记录',
 };
 
 export default zhCN;

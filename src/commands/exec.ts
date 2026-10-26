@@ -3,12 +3,19 @@
  *
  *   ssh-driver connect <hostId>            # 测活
  *   ssh-driver exec   <hostId> "ls -la"    # 执行命令，把 stdout 打印到终端
+ *   ssh-driver exec   <hostId> --script ./deploy.sh   # 执行本地脚本文件
+ *
+ * 所有远程操作都会写一条审计记录到 ~/.ssh-driver/history.log。
  * @Author Martin
  * @Date 2026/10/19
  */
 
+import { promises as fs } from 'fs';
+import * as path from 'path';
+
+import { appendAudit, redactSecrets } from '../audit/log';
 import { findHost, loadStore } from '../config/store';
-import { execOnce, pingOnce } from '../ssh/client';
+import { execOn, execScript, pingOnce } from '../ssh/client';
 import { logger } from '../utils/logger';
 import { HostConfig } from '../config/schema';
 
@@ -25,7 +32,17 @@ async function resolveHost(hostId: string): Promise<HostConfig> {
 
 export async function connectRun(hostId: string): Promise<void> {
   const host = await resolveHost(hostId);
+  const started = Date.now();
   const r = await pingOnce(host);
+  await appendAudit({
+    ts: new Date().toISOString(),
+    source: 'cli',
+    action: 'connect',
+    hostId: host.hostId,
+    durationMs: Date.now() - started,
+    ok: r.ok,
+    error: r.ok ? undefined : r.error,
+  });
   if (!r.ok) {
     logger.error(`连接失败：${r.error}`);
     process.exitCode = 1;
@@ -38,29 +55,102 @@ export async function connectRun(hostId: string): Promise<void> {
 export interface ExecOptions {
   /** 以 JSON 输出 {stdout, stderr, code}，便于程序化调用（AI 主要走这个） */
   json?: boolean;
-  /** 单次命令执行的 server 端 timeout(ms) */
+  /** 单次命令执行的超时(ms) */
   timeoutMs?: number;
+  /** 本地脚本文件路径；'-' 表示从 stdin 读 */
+  script?: string;
+  /** 脚本位置参数 $1 $2 ... */
+  args?: string[];
+  /** 脚本解释器；不给则按 shebang 推断 */
+  interpreter?: string;
 }
 
-export async function execRun(hostId: string, command: string, opts: ExecOptions = {}): Promise<void> {
-  const host = await resolveHost(hostId);
+interface LoadedScript {
+  content: string;
+  origin: string;
+}
 
-  // node-ssh 的 execCommand 没有超时参数，这里用 Promise.race 兜底
-  const work = execOnce(host, command);
-  let timer: NodeJS.Timeout | undefined;
-  const timeoutP = opts.timeoutMs
-    ? new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`exec timeout after ${opts.timeoutMs}ms`)),
-          opts.timeoutMs,
-        );
-      })
-    : null;
+/** 读取本地脚本内容 */
+async function loadScript(scriptPath: string): Promise<LoadedScript> {
+  if (scriptPath === '-') {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.from(chunk as Buffer));
+    }
+    return { content: Buffer.concat(chunks).toString('utf-8'), origin: 'stdin' };
+  }
+  const abs = path.resolve(scriptPath);
+  const content = await fs.readFile(abs, 'utf-8');
+  return { content, origin: abs };
+}
+
+export async function execRun(
+  hostId: string,
+  command: string,
+  opts: ExecOptions = {},
+): Promise<void> {
+  const host = await resolveHost(hostId);
+  const started = Date.now();
+
+  const isScript = typeof opts.script === 'string' && opts.script !== '';
+  const action = isScript ? 'exec-script' : 'exec';
 
   try {
-    const result = timeoutP
-      ? await Promise.race([work, timeoutP])
-      : await work;
+    if (isScript) {
+      const loaded = await loadScript(opts.script as string);
+      if (!loaded.content.trim()) {
+        throw new Error(`脚本 '${loaded.origin}' 是空的`);
+      }
+      const result = await execScript(host, loaded.content, {
+        interpreter: opts.interpreter,
+        args: opts.args,
+        timeoutMs: opts.timeoutMs,
+      });
+
+      await appendAudit({
+        ts: new Date().toISOString(),
+        source: 'cli',
+        action,
+        hostId: host.hostId,
+        script: loaded.origin === 'stdin' ? 'stdin' : loaded.origin,
+        args: opts.args,
+        code: result.code,
+        durationMs: Date.now() - started,
+        ok: result.code === 0 || result.code === null,
+      });
+
+      if (opts.json) {
+        console.log(
+          JSON.stringify({
+            stdout: result.stdout,
+            stderr: result.stderr,
+            code: result.code,
+            interpreter: result.interpreter,
+          }),
+        );
+      } else {
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+      }
+      if (typeof result.code === 'number' && result.code !== 0) {
+        process.exitCode = result.code;
+      }
+      return;
+    }
+
+    const result = await execOn(host, command, { timeoutMs: opts.timeoutMs });
+
+    await appendAudit({
+      ts: new Date().toISOString(),
+      source: 'cli',
+      action,
+      hostId: host.hostId,
+      command: redactSecrets(command),
+      code: result.code,
+      durationMs: Date.now() - started,
+      ok: result.code === 0 || result.code === null,
+    });
+
     if (opts.json) {
       console.log(JSON.stringify(result));
     } else {
@@ -71,13 +161,23 @@ export async function execRun(hostId: string, command: string, opts: ExecOptions
       process.exitCode = result.code;
     }
   } catch (err) {
+    const message = (err as Error).message;
+    await appendAudit({
+      ts: new Date().toISOString(),
+      source: 'cli',
+      action,
+      hostId: host.hostId,
+      command: isScript ? undefined : redactSecrets(command),
+      script: isScript ? (opts.script as string) : undefined,
+      durationMs: Date.now() - started,
+      ok: false,
+      error: message,
+    });
     if (opts.json) {
-      console.log(JSON.stringify({ error: (err as Error).message }));
+      console.log(JSON.stringify({ error: message }));
     } else {
-      logger.error(`执行失败：${(err as Error).message}`);
+      logger.error(`执行失败：${message}`);
     }
     process.exitCode = 1;
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }

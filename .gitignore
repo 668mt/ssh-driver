@@ -5,6 +5,7 @@ dist-server/
 .DS_Store
 .vite/
 .idea/
+coverage/
 
 # 本地 npm 覆盖配置（可能含 token，不要提交）
 .npmrc.local

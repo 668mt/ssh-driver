@@ -10,11 +10,12 @@ import {
   HostConfig,
   plainView,
 } from '../../config/schema';
+import { isMasked, mergeHostConfig } from '../../config/merge';
 import {
   deleteHost,
   findHost,
   loadStore,
-  saveStore,
+  replaceHost,
   upsertHost,
 } from '../../config/store';
 import { pingOnce } from '../../ssh/client';
@@ -33,25 +34,42 @@ function hostNotFound(res: Response, hostId: string): void {
   notFound(res, `主机 '${hostId}' 不存在`);
 }
 
-/** 校验主机连接的必要字段（不含 hostId —— 测试连接时 hostId 可以还没填） */
-function requireConnectionFields(body: Partial<HostConfig>): void {
+/**
+ * 校验主机连接的必要字段（不含 hostId —— 测试连接时 hostId 可以还没填）
+ *
+ * @param allowMasked 脱敏占位符 '***' 是否算有效凭据。
+ *   「测试连接」场景下算有效（后面会从 store 回填真实值）；
+ *   「保存」场景下不算有效（否则会把 '***' 当密码存进去）。
+ */
+function requireConnectionFields(body: Partial<HostConfig>, allowMasked = false): void {
   if (!body.host || typeof body.host !== 'string') {
     throw new Error('host（主机/IP）是必填项');
   }
   if (!body.username || typeof body.username !== 'string') {
     throw new Error('username（用户名）是必填项');
   }
-  if (!body.password && !body.privateKey) {
-    throw new Error('password 和 privateKey 至少要填一个');
+  const pwd = allowMasked ? body.password : isMasked(body.password) ? undefined : body.password;
+  const key = allowMasked ? body.privateKey : isMasked(body.privateKey) ? undefined : body.privateKey;
+  if (!pwd && !key) {
+    throw new Error(
+      allowMasked
+        ? 'password 和 privateKey 至少要填一个'
+        : 'password 和 privateKey 至少要填一个（脱敏占位符 *** 不能作为凭据保存）',
+    );
   }
 }
 
-/** 保存主机时的完整校验，必须有 hostId */
-function requireHostId(body: Partial<HostConfig>): asserts body is HostConfig {
+/** 校验 hostId 本身 */
+function requireHostIdField(body: Partial<HostConfig>): asserts body is Partial<HostConfig> & { hostId: string } {
   if (!body.hostId || typeof body.hostId !== 'string') {
     throw new Error('hostId（唯一标识）是必填项');
   }
-  requireConnectionFields(body);
+}
+
+/** 保存主机时的完整校验，必须有 hostId 和有效凭据 */
+function requireHostId(body: Partial<HostConfig>): asserts body is HostConfig {
+  requireHostIdField(body);
+  requireConnectionFields(body, false);
 }
 
 function normalize(body: Partial<CreateHostBody>): Partial<CreateHostBody> {
@@ -84,8 +102,17 @@ hostsRouter.get('/:hostId', async (req: Request, res: Response) => {
 hostsRouter.post('/', async (req: Request, res: Response) => {
   try {
     const body = normalize(req.body as CreateHostBody);
-    requireHostId(body);
-    const { created } = await upsertHost(body);
+    requireHostIdField(body);
+
+    // 掩码占位符（'***'）不能当成密码存进去。
+    // POST 是「创建 / 覆盖」语义：若目标 hostId 已存在，就用已保存的
+    // 真实凭据补齐脱敏字段；不存在则原样保存（后续连接时会明确报错）。
+    const store = await loadStore();
+    const existing = findHost(store, body.hostId);
+    const merged = mergeHostConfig(existing, body);
+    requireHostId(merged);
+
+    const { created } = await upsertHost(merged);
     res.status(created ? 201 : 200).json({ created });
   } catch (err) {
     badRequest(res, (err as Error).message);
@@ -118,18 +145,13 @@ hostsRouter.put('/:hostId', async (req: Request, res: Response) => {
       }
     }
 
-    // 合并：保留原 createdAt；其余字段以 body 为准
-    const { hostId: _ignored, ...rest } = body;
-    const merged: HostConfig = {
-      ...existing,
-      ...rest,
-      hostId: candidateNewId,
-    };
+    // 合并语义见 config/merge.ts：
+    //   undefined → 保留原值；'***' → 保留原值；'' → 显式清空；其它 → 覆盖
+    const merged = mergeHostConfig(existing, body);
+    merged.hostId = candidateNewId;
     requireHostId(merged);
 
-    // 先把旧记录从 store 拿掉（如果是 rename，避免同时存在两条），再写新的
-    await deleteHost(existing.hostId);
-    await upsertHost(merged);
+    await replaceHost(existing.hostId, merged);
 
     res.json({ updated: true, hostId: merged.hostId, renamed: merged.hostId !== oldId });
   } catch (err) {
@@ -157,23 +179,18 @@ hostsRouter.post('/:hostId/test', async (req: Request, res: Response) => {
   // 优先用 body 里传的连接信息（新增/编辑表单的"测试"按钮走这条路）
   if (req.body && (req.body.host || req.body.username)) {
     try {
-      requireConnectionFields(req.body);
+      requireConnectionFields(req.body, true);
     } catch (err) {
       return badRequest(res, (err as Error).message);
     }
     // body 里的敏感字段可能是 '***' 占位符（编辑已有主机且用户没改密码），
     // 这时回退到 store 里已保存的主机补齐凭据。
     const candidate = normalize(req.body) as HostConfig;
-    if (candidate.password === '***' || candidate.privateKey === '***' || candidate.passphrase === '***') {
-      const store = await loadStore();
-      const saved = findHost(store, pathHostId) ?? (candidate.hostId ? findHost(store, candidate.hostId) : undefined);
-      if (saved) {
-        if (candidate.password === '***') candidate.password = saved.password;
-        if (candidate.privateKey === '***') candidate.privateKey = saved.privateKey;
-        if (candidate.passphrase === '***') candidate.passphrase = saved.passphrase;
-      }
-    }
-    const r = await pingOnce(candidate);
+    const store = await loadStore();
+    const saved =
+      findHost(store, pathHostId) ?? (candidate.hostId ? findHost(store, candidate.hostId) : undefined);
+    const merged = mergeHostConfig(saved, candidate);
+    const r = await pingOnce(merged);
     return res.json(r);
   }
 
