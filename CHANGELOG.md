@@ -7,46 +7,6 @@
 
 ## [Unreleased]
 
-### 修复
-
-- **命令超时后远端进程不再变孤儿** 🔴
-  - 之前超时只是「本地不等了」—— 远端命令继续跑，成为孤儿进程，
-    还一直占着 sshd 的 MaxSessions channel 配额。
-  - 现在超时会通过 SSH 的 signal 请求（RFC 4254 §6.9）杀掉远端进程组：
-    `SIGTERM` → 300ms 宽限期 → `SIGKILL`。
-  - ⚠️ 坑：node-ssh 在没有 stdin 时会立刻 `channel.end()`，
-    channel 变成 `state='eof' / writable=false`，
-    而 ssh2 公开的 `signal()` 要求 `state==='open'` —— 直接调用是**静默 no-op**。
-    所以实现走协议层发信号，绕开这个状态检查。
-  - 也**不是** `channel.close()` 能解决的：sshd 收到 channel 关闭只清理自己的
-    会话状态，不会杀掉已经 setsid 脱离的远端命令（实测远端进程仍在，ppid=1）。
-  - 实测：超时后远端 `sleep 300` 进程消失，连接仍可继续复用。
-- **命令超时不再被误判成「连接坏了」** 🔴
-  - 超时是「命令跑太久」，不是「连接失效」。
-  - 之前重连逻辑会重试一次 —— 但超时的命令**可能已经产生了副作用**
-    （写了半个文件、改了半个配置），重试等于把副作用做两遍。
-  - 现在超时用独立的 `CommandTimeoutError` 类型（`code=ETIMEDOUT`），
-    明确不参与重连重试。
-- **并发超过 sshd MaxSessions 不再硬失败** 🔴
-  - sshd 的 `MaxSessions` 默认 10（每条 TCP 连接最多 10 个 session channel），
-    超过直接报 `(SSH) Channel open failure: open failed` —— 是硬失败，不排队。
-  - 现在连接池给每台主机加了并发闸门（默认 8，留 2 个余量），
-    超出的请求排队等待而不是直接失败。
-  - 万一还是撞上（比如远端把 MaxSessions 调到更小），会识别成
-    「远端不给你开 channel」（连接本身是好的），等 250ms 后重试一次，
-    **不会**重建连接。
-  - 实测：同一台机器并发 20 条命令，20/20 全部成功（修复前 12 条并发就有 3 条失败）。
-- **控制台导入配置不再绕过文件锁** 🟡
-  - `POST /api/io/import` 之前直接 `saveStore()`，没走 `withStoreLock`，
-    与 CLI / MCP 同时改配置时会丢更新，凭据可能凭空消失。
-  - 现在整个「读 → 合并 → 写」都在同一把锁里完成
-    （新增 `mutateStore()` 原语）。
-- **SSH 连接报错不再让整个进程崩掉** 🟡
-  - node-ssh 在连接 ready 之后会摘掉它的 `error` 监听器，
-    此后连接上再出任何 error，Node 会当成「未处理的 error 事件」**直接终止进程**
-    —— MCP server 会当场崩掉。
-  - 现在所有连接入口都走 `connectSsh()`，统一挂上兜底的 error 监听器。
-
 ### 计划中
 
 - 多主机批量执行（并发上限 + 聚合 JSON）
@@ -101,6 +61,43 @@
 
 ### 修复
 
+- **命令超时后远端进程不再变孤儿** 🔴
+  - 之前超时只是「本地不等了」—— 远端命令继续跑，成为孤儿进程，
+    还一直占着 sshd 的 MaxSessions channel 配额。
+  - 现在超时会通过 SSH 的 signal 请求（RFC 4254 §6.9）杀掉远端进程组：
+    `SIGTERM` → 300ms 宽限期 → `SIGKILL`。
+  - ⚠️ 坑：node-ssh 在没有 stdin 时会立刻 `channel.end()`，
+    channel 变成 `state='eof' / writable=false`，
+    而 ssh2 公开的 `signal()` 要求 `state==='open'` —— 直接调用是**静默 no-op**。
+    所以实现走协议层发信号，绕开这个状态检查。
+  - 也**不是** `channel.close()` 能解决的：sshd 收到 channel 关闭只清理自己的
+    会话状态，不会杀掉已经 setsid 脱离的远端命令（实测远端进程仍在，ppid=1）。
+  - 实测：超时后远端 `sleep 300` 进程消失，连接仍可继续复用。
+- **命令超时不再被误判成「连接坏了」** 🔴
+  - 超时是「命令跑太久」，不是「连接失效」。
+  - 之前重连逻辑会重试一次 —— 但超时的命令**可能已经产生了副作用**
+    （写了半个文件、改了半个配置），重试等于把副作用做两遍。
+  - 现在超时用独立的 `CommandTimeoutError` 类型（`code=ETIMEDOUT`），
+    明确不参与重连重试。
+- **并发超过 sshd MaxSessions 不再硬失败** 🔴
+  - sshd 的 `MaxSessions` 默认 10（每条 TCP 连接最多 10 个 session channel），
+    超过直接报 `(SSH) Channel open failure: open failed` —— 是硬失败，不排队。
+  - 现在连接池给每台主机加了并发闸门（默认 8，留 2 个余量），
+    超出的请求排队等待而不是直接失败。
+  - 万一还是撞上（比如远端把 MaxSessions 调到更小），会识别成
+    「远端不给你开 channel」（连接本身是好的），等 250ms 后重试一次，
+    **不会**重建连接。
+  - 实测：同一台机器并发 20 条命令，20/20 全部成功（修复前 12 条并发就有 3 条失败）。
+- **控制台导入配置不再绕过文件锁** 🟡
+  - `POST /api/io/import` 之前直接 `saveStore()`，没走 `withStoreLock`，
+    与 CLI / MCP 同时改配置时会丢更新，凭据可能凭空消失。
+  - 现在整个「读 → 合并 → 写」都在同一把锁里完成
+    （新增 `mutateStore()` 原语）。
+- **SSH 连接报错不再让整个进程崩掉** 🟡
+  - node-ssh 在连接 ready 之后会摘掉它的 `error` 监听器，
+    此后连接上再出任何 error，Node 会当成「未处理的 error 事件」**直接终止进程**
+    —— MCP server 会当场崩掉。
+  - 现在所有连接入口都走 `connectSsh()`，统一挂上兜底的 error 监听器。
 - **`--limit` / `--timeout` 之前是静默失效的** 🔴
   - 根因：commander 在选项**带默认值**时会把默认值作为第二个参数传给转换函数，
     而 `parseInt` 的第二个参数是**进制** → `parseInt('6', 50)` = `NaN`
