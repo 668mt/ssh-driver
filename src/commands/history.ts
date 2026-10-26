@@ -38,11 +38,14 @@ function formatTime(iso: string): string {
 }
 
 function summarize(entry: AuditEntry): string {
-  if (entry.action === 'exec' || entry.action === 'exec-script') {
-    const what = entry.command ?? entry.script ?? '(脚本)';
-    return what.length > 60 ? `${what.slice(0, 57)}...` : what;
-  }
-  return entry.action;
+  const what =
+    entry.action === 'exec' || entry.action === 'exec-script'
+      ? (entry.command ?? entry.script ?? '(脚本)')
+      : entry.action === 'upload' || entry.action === 'download'
+        ? (entry.script ?? entry.action)
+        : null;
+  if (what === null) return entry.action;
+  return what.length > 60 ? `${what.slice(0, 57)}...` : what;
 }
 
 /** 失败原因：优先错误信息，没有就退化成退出码 */

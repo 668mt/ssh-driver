@@ -13,6 +13,8 @@ import { connectRun, execRun } from './commands/exec';
 import { runConsole } from './commands/console';
 import { runMcp } from './commands/mcp';
 import { historyRun } from './commands/history';
+import { readRun } from './commands/read';
+import { writeRun } from './commands/write';
 import { logger } from './utils/logger';
 import { parseIntArg } from './utils/parse';
 
@@ -112,6 +114,59 @@ async function main(): Promise<void> {
           });
         } catch (err) {
           logger.error(`执行失败：${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      },
+    );
+
+  program
+    .command('read <hostId> <remotePath>')
+    .description('读取远程主机上的文件')
+    .option('-o, --output <localPath>', '保存到本地文件（默认输出到标准输出）')
+    .option('--max-bytes <n>', `最大读取字节数（默认 ${262144}）`, parseIntArg)
+    .option('--base64', '以 base64 输出（二进制文件）', false)
+    .option('--json', '以 JSON 输出', false)
+    .action(
+      async (
+        hostId: string,
+        remotePath: string,
+        opts: { output?: string; maxBytes?: number; base64?: boolean; json?: boolean },
+      ) => {
+        try {
+          await readRun(hostId, remotePath, opts);
+        } catch (err) {
+          logger.error(`读取失败：${(err as Error).message}`);
+          process.exitCode = 1;
+        }
+      },
+    );
+
+  program
+    .command('write <hostId> <remotePath>')
+    .description('把内容写入远程主机上的文件（默认不覆盖已存在的文件）')
+    .option('-f, --file <localPath>', '从本地文件读取内容（"-" 表示从标准输入读取）')
+    .option('-c, --content <text>', '直接指定要写入的内容')
+    .option('--overwrite', '允许覆盖已存在的远端文件', false)
+    .option('--mode <octal>', '设置文件权限，如 0644')
+    .option('--create-dir', '父目录不存在时自动创建', false)
+    .option('--json', '以 JSON 输出', false)
+    .action(
+      async (
+        hostId: string,
+        remotePath: string,
+        opts: {
+          file?: string;
+          content?: string;
+          overwrite?: boolean;
+          mode?: string;
+          createDir?: boolean;
+          json?: boolean;
+        },
+      ) => {
+        try {
+          await writeRun(hostId, remotePath, opts);
+        } catch (err) {
+          logger.error(`写入失败：${(err as Error).message}`);
           process.exitCode = 1;
         }
       },

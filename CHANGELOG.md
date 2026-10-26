@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **`ssh-driver read` / `ssh-driver write` 命令**（SFTP 文件读写）
+  - `read <hostId> <remotePath>` —— 读远端文件
+    - `--output <本地文件>` 保存到本机（存的是原始字节，不是 base64 文本）
+    - `--base64` 输出 base64（二进制文件）
+    - `--max-bytes <n>` 调整读取上限（默认 256KB）
+    - `--json` 结构化输出
+  - `write <hostId> <remotePath>` —— 写远端文件
+    - 内容来源三选一：`--file <本地文件>` / `--content <文本>` / `--file -`（标准输入）
+    - **默认不覆盖**已存在的远端文件，报错退出（退出码 1）—— 写错路径不会冲掉生产配置
+    - `--overwrite` 显式覆盖
+    - `--mode 0644` 指定权限、`--create-dir` 自动建父目录
+  - 读写都会写审计日志（action = `download` / `upload`）
+- **MCP `write_file` / `read_file` 升级**
+  - `write_file` 支持 `localPath`（传本机文件）、`overwrite`、`mode`、`createDir`
+    —— 同样**默认不覆盖**
+  - `read_file` 支持 `localPath`（存到本机）、返回 `binary` 标记与 base64
+- 本地路径解析兜底（`src/utils/localpath.ts`）
+  - Git Bash / MSYS 下用 `cygpath` 把 `/tmp/x` 映射到真实的 Temp 目录
+  - 配合 `MSYS_NO_PATHCONV=1` 使用（远端 POSIX 路径不再被改写）
+
 ### 计划中
 
 - 多主机批量执行（并发上限 + 聚合 JSON）

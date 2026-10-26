@@ -44,6 +44,7 @@
 | **连接管理** | 主机以 `hostId` 为唯一标识保存，支持增删改查、改名、标签分组 |
 | **远程执行** | 单条命令执行，返回 stdout / stderr / exit code，支持 JSON 输出 |
 | **脚本执行** | `--script` 把本地脚本喂给远端解释器执行，不在远端留临时文件 |
+| **文件读写** | `read` / `write` 走 SFTP，写入默认不覆盖，支持传本地文件 |
 | **审计日志** | 每次远程操作都留痕（谁、何时、跑了什么、结果如何），命令自动脱敏 |
 | **网页控制台** | Vite + React 界面，中文、浅色主题，可视化编辑、执行与导入导出 |
 | **连通性测试** | 密码 / 私钥双模式，配置前就能验证是否可达 |
@@ -138,6 +139,8 @@ ssh-driver config list [--json] | show | update | remove | test
 ssh-driver connect <hostId>
 ssh-driver exec <hostId> "<cmd>" [--json] [--timeout <ms>]
 ssh-driver exec <hostId> --script <file> [--arg <v>]... [--interpreter <cmd>]
+ssh-driver read <hostId> <remotePath> [--output <file>] [--base64] [--json]
+ssh-driver write <hostId> <remotePath> [--file <file> | --content <text>] [--overwrite]
 ssh-driver history [--limit <n>] [--host <id>] [--failed] [--json]
                   # --limit 0 = 全部
 ssh-driver console [--port <n>] [--host <addr>] [--dev] [--no-open] [--token <t>]
@@ -206,6 +209,46 @@ ssh-driver exec prod-web-01 --script ./deploy.py --interpreter python3
 
 好处是**不在远端留临时文件**，也不依赖远端有可写目录或装了 sftp-server。
 
+## 文件读写
+
+`read` / `write` 走 SFTP。
+
+```bash
+# 读：直接输出到标准输出
+ssh-driver read prod-web-01 /etc/hostname
+
+# 读：存到本地文件
+ssh-driver read prod-web-01 /tmp/app.log --output ./app.log
+
+# 读：二进制文件用 base64
+ssh-driver read prod-web-01 /tmp/photo.png --base64
+
+# 写：直接给内容
+ssh-driver write prod-web-01 /etc/app.conf --content "hello"
+
+# 写：从本地文件传
+ssh-driver write prod-web-01 /etc/app.conf --file ./app.conf
+
+# 写：从标准输入传
+cat app.conf | ssh-driver write prod-web-01 /etc/app.conf --file -
+
+# 写：允许覆盖（默认不覆盖！）
+ssh-driver write prod-web-01 /etc/app.conf --file ./new.conf --overwrite
+
+# 写：自动建父目录 + 指定权限
+ssh-driver write prod-web-01 /opt/app/conf/app.conf --file ./app.conf --create-dir --mode 0644
+```
+
+> ⚠️ **默认不覆盖**。远端文件已存在时会直接报错退出（退出码 1），必须显式加 `--overwrite`。
+> 这是刻意的：Agent 写错路径不该把生产配置冲掉。
+
+> ⚠️ **Git Bash / MSYS 下要给远端路径加 `MSYS_NO_PATHCONV=1`**：
+> ```bash
+> MSYS_NO_PATHCONV=1 ssh-driver write prod-web-01 /etc/app.conf --content "x"
+> ```
+> 否则 Git Bash 会把 `/etc/app.conf` 改写成 `C:/Program Files/Git/etc/app.conf`。
+> （本地文件路径 `--file` / `--output` 不受影响，工具内部会用 `cygpath` 自动兜底。）
+
 ## MCP Server
 
 `ssh-driver mcp` 以 MCP (stdio) 协议启动，任何支持 MCP 的客户端（OpenCode / Claude Desktop / Codex …）都能直接调用。
@@ -230,8 +273,8 @@ ssh-driver exec prod-web-01 --script ./deploy.py --interpreter python3
 | `exec_command` | 在远端执行一条命令 |
 | `exec_script` | 执行脚本（内容或本机文件路径），可传参数 |
 | `list_files` | SFTP 列出远端目录 |
-| `read_file` | SFTP 读取远端文件（>256KB 截断） |
-| `write_file` | SFTP 写入远端文件 |
+| `read_file` | SFTP 读取远端文件（>256KB 截断），可存到本机 |
+| `write_file` | SFTP 写入远端文件，**默认不覆盖**，需显式 `overwrite=true` |
 | `session_status` | 查看当前缓存了哪些 SSH 连接 |
 | `close_session` | 主动断开缓存的连接 |
 | `get_history` | 查询操作审计日志 |
@@ -286,7 +329,6 @@ ssh-driver console --dev            # 开发模式（vite HMR）
 | `GET` | `/api/io/export` | 导出配置（脱敏） |
 | `POST` | `/api/io/import` | 导入配置 |
 | `GET` | `/api/history` | 读取审计日志 |
-
 ```bash
 TOKEN=$(cat ~/.ssh-driver/console-token)
 curl -H "X-Ssh-Driver-Token: $TOKEN" http://127.0.0.1:7843/api/hosts

@@ -47,6 +47,8 @@ ssh-driver config test   <hostId>                   # 测活
 ssh-driver connect <hostId>                         # 测活
 ssh-driver exec   <hostId> "<cmd>" [--json] [--timeout <ms>]
 ssh-driver exec   <hostId> --script <file> [--arg <v>]... [--interpreter <cmd>]
+ssh-driver read   <hostId> <remotePath> [--output <file>] [--base64] [--json]
+ssh-driver write  <hostId> <remotePath> [--file <file> | --content <text>] [--overwrite] [--mode <octal>] [--create-dir]
 ssh-driver history [--limit <n>] [--host <id>] [--failed] [--json]
 ssh-driver mcp                                      # 以 MCP (stdio) 模式启动
 ```
@@ -94,6 +96,40 @@ ssh-driver exec prod-web-01 --script ./deploy.py --interpreter python3
 - 远端命令拼装：bash 家族 `bash -s <args>`；其它解释器 `<interp> - <args>`
 - 脚本在**本地**读取，路径是本机路径；远端已存在的脚本直接用 `exec <hostId> "bash /path/to.sh"`
 
+## 文件读写（SFTP）
+
+```bash
+# 读
+ssh-driver read prod-web-01 /etc/hostname
+ssh-driver read prod-web-01 /tmp/app.log --output ./app.log   # 存到本地
+ssh-driver read prod-web-01 /tmp/photo.png --base64           # 二进制
+
+# 写（内容 / 本地文件 / 标准输入 三选一）
+ssh-driver write prod-web-01 /etc/app.conf --content "hello"
+ssh-driver write prod-web-01 /etc/app.conf --file ./app.conf
+cat app.conf | ssh-driver write prod-web-01 /etc/app.conf --file -
+
+# 覆盖已有文件必须显式加 --overwrite
+ssh-driver write prod-web-01 /etc/app.conf --file ./new.conf --overwrite
+
+# 自动建父目录 + 权限
+ssh-driver write prod-web-01 /opt/app/conf/app.conf --file ./app.conf --create-dir --mode 0644
+```
+
+**重要约定**：
+
+- **写入默认不覆盖**。远端文件已存在 → 直接报错、退出码 1，**不会**改坏原文件。
+  确实要覆盖时**必须显式**加 `--overwrite`。
+  **不要**为了图省事就默认加 `--overwrite` —— 先确认目标路径对不对。
+- `--file` 读的是**本机**文件；`--file -` 从标准输入读。
+- ⚠️ **Git Bash / MSYS 下，远端路径必须加 `MSYS_NO_PATHCONV=1`**，
+  否则 `/etc/app.conf` 会被改写成 `C:/Program Files/Git/etc/app.conf`：
+  ```bash
+  MSYS_NO_PATHCONV=1 ssh-driver write prod-web-01 /etc/app.conf --content "x"
+  ```
+  （本地路径 `--file` / `--output` 不受影响，工具内部会自动用 `cygpath` 兜底。）
+- 读大文件默认上限 256KB（`--max-bytes` 可调）；二进制文件用 `--base64`。
+
 ## MCP Server
 
 ```bash
@@ -118,9 +154,15 @@ MCP 客户端配置：
 | `test_host` | 测试连通性 |
 | `exec_command` | 在远端执行一条命令 |
 | `exec_script` | 执行脚本（内容或本机文件路径） |
-| `list_files` / `read_file` / `write_file` | SFTP 文件操作 |
-| `session_status` / `close_session` | 查看 / 释放缓存的 SSH 连接 |
+| `list_files` | SFTP 列出远端目录 |
+| `read_file` | SFTP 读取远端文件（可存到本机 `localPath`） |
+| `write_file` | SFTP 写入远端文件（内容 `content` 或本机 `localPath`），**默认不覆盖** |
+| `session_status` | 查看当前缓存的 SSH 连接 |
+| `close_session` | 主动断开缓存的连接 |
 | `get_history` | 查询审计日志 |
+
+> MCP 的 `write_file` 同样**默认不覆盖**，远端文件已存在时会返回错误，
+> 需要显式传 `overwrite: true`。
 
 > MCP server 会**缓存 SSH 连接**并复用，连续执行多条命令很快。
 > 远端把连接掐断时会自动重连重试一次。

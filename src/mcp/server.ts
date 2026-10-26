@@ -16,6 +16,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import * as nodePath from 'path';
 import { z } from 'zod';
 
 import { appendAudit, readAudit, redactSecrets } from '../audit/log';
@@ -23,7 +24,7 @@ import { HostConfig } from '../config/schema';
 import { findHost, loadStore } from '../config/store';
 import { execOnSsh, execScriptOnSsh } from '../ssh/client';
 import { globalPool, SshSessionPool } from '../ssh/pool';
-import { listRemoteDir, readRemoteFile, writeRemoteFile } from '../ssh/sftp';
+import { listRemoteDir, readRemoteFile, RemoteFileExistsError, writeRemoteFile } from '../ssh/sftp';
 
 /** MCP 工具里不允许出现明文凭据，列表接口一律脱敏 */
 function maskHost(h: HostConfig): Record<string, unknown> {
@@ -315,14 +316,17 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
     'read_file',
     {
       title: '读取远端文件',
-      description: '通过 SFTP 读取远端文件内容。超过 256KB 会截断。',
+      description:
+        '通过 SFTP 读取远端文件内容。超过 maxBytes 会截断（默认 256KB）。' +
+        '给 localPath 时把原始字节保存到本机文件，不返回内容。',
       inputSchema: {
         hostId: z.string().describe('主机 id'),
         path: z.string().describe('远端文件路径'),
         maxBytes: z.number().optional().describe('最大读取字节数，默认 262144'),
+        localPath: z.string().optional().describe('保存到本机文件（可选）；给了就不返回内容'),
       },
     },
-    async ({ hostId, path, maxBytes }) => {
+    async ({ hostId, path, maxBytes, localPath }) => {
       try {
         const host = await resolveHost(hostId);
         const file = await pool.withSession(host, session =>
@@ -336,7 +340,31 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
           script: path,
           ok: true,
         });
-        return ok({ hostId: host.hostId, path, ...file });
+
+        if (localPath) {
+          const { promises: fs } = await import('fs');
+          const abs = nodePath.resolve(localPath);
+          await fs.mkdir(nodePath.dirname(abs), { recursive: true });
+          await fs.writeFile(abs, Buffer.from(file.base64, 'base64'));
+          return ok({
+            hostId: host.hostId,
+            path,
+            bytes: file.bytes,
+            truncated: file.truncated,
+            binary: file.binary,
+            savedTo: abs,
+          });
+        }
+
+        return ok({
+          hostId: host.hostId,
+          path,
+          bytes: file.bytes,
+          truncated: file.truncated,
+          binary: file.binary,
+          content: file.content,
+          base64: file.base64,
+        });
       } catch (err) {
         return fail(`读取文件失败：${(err as Error).message}`);
       }
@@ -347,27 +375,83 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
     'write_file',
     {
       title: '写入远端文件',
-      description: '通过 SFTP 把内容写入远端文件（会覆盖同名文件）。',
+      description:
+        '把内容写入远端文件（SFTP）。内容可以来自 content（文本）或 localPath（本机文件）。' +
+        '**默认不覆盖**已存在的文件 —— 已存在时会报错，需要显式传 overwrite=true。',
       inputSchema: {
         hostId: z.string().describe('主机 id'),
         path: z.string().describe('远端文件路径'),
-        content: z.string().describe('文件内容'),
+        content: z.string().optional().describe('要写入的文本内容（与 localPath 二选一）'),
+        localPath: z.string().optional().describe('本机文件路径（与 content 二选一）'),
+        overwrite: z.boolean().optional().describe('允许覆盖已存在的远端文件，默认 false'),
+        mode: z.number().optional().describe('文件权限，如 420 表示 0644'),
+        createDir: z.boolean().optional().describe('父目录不存在时自动创建，默认 false'),
       },
     },
-    async ({ hostId, path, content }) => {
+    async ({ hostId, path, content, localPath, overwrite, mode, createDir }) => {
+      let data: Buffer;
+      let source: string;
       try {
-        const host = await resolveHost(hostId);
-        await pool.withSession(host, session => writeRemoteFile(session.ssh, path, content));
+        if (content !== undefined) {
+          data = Buffer.from(content, 'utf-8');
+          source = 'inline';
+        } else if (localPath) {
+          const { promises: fs } = await import('fs');
+          const abs = nodePath.resolve(localPath);
+          data = await fs.readFile(abs);
+          source = abs;
+        } else {
+          return fail('必须提供 content（文本内容）或 localPath（本机文件路径）');
+        }
+      } catch (err) {
+        return fail(`准备内容失败：${(err as Error).message}`);
+      }
+
+      const started = Date.now();
+      let host: HostConfig;
+      try {
+        host = await resolveHost(hostId);
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+      try {
+        const result = await pool.withSession(host, session =>
+          writeRemoteFile(session.ssh, path, data, {
+            overwrite: overwrite === true,
+            mode,
+            createDir: createDir === true,
+          }),
+        );
         await appendAudit({
           ts: new Date().toISOString(),
           source: 'mcp',
           action: 'upload',
           hostId: host.hostId,
-          script: path,
+          script: `${source} → ${path}`,
+          durationMs: Date.now() - started,
           ok: true,
         });
-        return ok({ hostId: host.hostId, path, written: Buffer.byteLength(content, 'utf-8') });
+        return ok({
+          hostId: host.hostId,
+          path: result.path,
+          bytes: result.bytes,
+          overwritten: result.overwritten,
+          mode: result.mode,
+        });
       } catch (err) {
+        await appendAudit({
+          ts: new Date().toISOString(),
+          source: 'mcp',
+          action: 'upload',
+          hostId: host.hostId,
+          script: `${source} → ${path}`,
+          durationMs: Date.now() - started,
+          ok: false,
+          error: (err as Error).message,
+        });
+        if (err instanceof RemoteFileExistsError) {
+          return fail(`${err.message}（如果确实要覆盖，请传 overwrite=true）`);
+        }
         return fail(`写入文件失败：${(err as Error).message}`);
       }
     },
