@@ -17,22 +17,14 @@ import { readRun } from './commands/read';
 import { writeRun } from './commands/write';
 import { logger } from './utils/logger';
 import { parseIntArg } from './utils/parse';
+import { readPackageVersion } from './utils/version';
 
 /**
- * 从 package.json 读版本号 —— 单一事实来源。
+ * 版本号从 package.json 读 —— 单一事实来源。
  * 之前这里是写死的 '0.2.0'，发布新版本后 `ssh-driver --version` 还在报旧版本。
- *
- * 路径说明：编译产物是 dist/cli.js，源码是 src/cli.ts，
- * 两者到包根的相对路径都是 '../package.json'。
  */
 function readVersion(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pkg = require('../package.json') as { version?: string };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
+  return readPackageVersion();
 }
 
 /** 收集可重复的 --arg 选项 */

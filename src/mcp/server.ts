@@ -25,6 +25,7 @@ import { findHost, loadStore } from '../config/store';
 import { execOnSsh, execScriptOnSsh } from '../ssh/client';
 import { globalPool, SshSessionPool } from '../ssh/pool';
 import { listRemoteDir, readRemoteFile, RemoteFileExistsError, writeRemoteFile } from '../ssh/sftp';
+import { readPackageVersion } from '../utils/version';
 
 /** MCP 工具里不允许出现明文凭据，列表接口一律脱敏 */
 function maskHost(h: HostConfig): Record<string, unknown> {
@@ -72,7 +73,8 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
   const pool = opts.pool ?? globalPool;
   const server = new McpServer({
     name: 'ssh-driver',
-    version: '0.4.0',
+    // 版本号从 package.json 读，别写死
+    version: readPackageVersion(),
   });
 
   /* ------------------------------ 主机 ------------------------------ */

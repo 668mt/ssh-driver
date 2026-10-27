@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### 计划中
+
+- 多主机批量执行（并发上限 + 聚合 JSON）
+- 从 `~/.ssh/config` 导入主机
+- ProxyJump 跳板机支持
+- 配置加密存储（配合系统 keychain）
+- 命令护栏（黑名单 / 只读模式）
+
+## [0.5.0] - 2026-10-27
+
 ### 新增
 
 - **`ssh-driver read` / `ssh-driver write` 命令**（SFTP 文件读写）
@@ -29,13 +39,17 @@
   - Git Bash / MSYS 下用 `cygpath` 把 `/tmp/x` 映射到真实的 Temp 目录
   - 配合 `MSYS_NO_PATHCONV=1` 使用（远端 POSIX 路径不再被改写）
 
-### 计划中
+### 变更
 
-- 多主机批量执行（并发上限 + 聚合 JSON）
-- 从 `~/.ssh/config` 导入主机
-- ProxyJump 跳板机支持
-- 配置加密存储（配合系统 keychain）
-- 命令护栏（黑名单 / 只读模式）
+- **版本号改为单一事实来源** —— CLI 的 `--version` 与 MCP 的 `serverInfo.version`
+  都从 `package.json` 读，不再各写一份（之前 CLI 写死 `0.2.0`、MCP 写死 `0.4.0`，
+  都会跟实际版本脱节）
+- 审计日志的 history 表格里 upload/download 现在显示文件路径，不再只显示动作名
+
+## [0.4.0] - 2026-10-27
+
+> ⚠️ **本版本没有发布到 npm**（发布时 npm token 失效），npm 上从 0.3.0 直接跳到 0.5.0。
+> GitHub 上的 `v0.4.0` tag 保留，对应代码状态。
 
 ## [0.4.0] - 2026-10-26
 
@@ -219,7 +233,8 @@
   - `--timeout` 命令级超时（best-effort，不强制终止远端进程）
 - AI Skill 定义 `skill/SKILL.md`，包含配置流程、字段约定与注意事项
 
-[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/668mt/ssh-driver/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/668mt/ssh-driver/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/668mt/ssh-driver/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/668mt/ssh-driver/compare/v0.1.0...v0.2.0

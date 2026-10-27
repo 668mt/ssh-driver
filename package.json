@@ -1,6 +1,6 @@
 {
   "name": "ssh-driver",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "让 AI Agent 安全地连接远程服务器并执行命令 —— SSH 连接管理 CLI + 网页控制台 + MCP Server + AI Skill",
   "keywords": [
     "ssh",
