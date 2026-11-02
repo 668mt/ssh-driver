@@ -203,6 +203,24 @@ button.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
   margin-right: 4px;
 }
 
+/* 禁用状态徽标 */
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  margin-left: 8px;
+}
+.badge.disabled {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+}
+/* 被禁用的主机整行变灰 */
+.host-row.disabled {
+  opacity: 0.65;
+}
+
 /* === 模态框 === */
 .modal-backdrop {
   position: fixed;

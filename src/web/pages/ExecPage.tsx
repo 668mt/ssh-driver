@@ -49,8 +49,13 @@ export const ExecPage: React.FC<Props> = ({ notify }) => {
   const loadHosts = useCallback(async () => {
     try {
       const list = await api.listHosts();
-      setHosts(list.map(h => ({ hostId: h.hostId, description: h.description })));
-      setHostId(prev => prev || (list[0]?.hostId ?? ''));
+      // 被禁用的主机不能作为执行目标，直接从下拉里去掉
+      const usable = list.filter(h => !h.disabled);
+      setHosts(usable.map(h => ({ hostId: h.hostId, description: h.description })));
+      setHostId(prev => {
+        if (prev && usable.some(h => h.hostId === prev)) return prev;
+        return usable[0]?.hostId ?? '';
+      });
     } catch (err) {
       notify('fail', (err as Error).message);
     }

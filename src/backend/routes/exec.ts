@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 
 import { appendAudit, redactSecrets } from '../../audit/log';
+import { isHostDisabled } from '../../config/schema';
 import { findHost, loadStore } from '../../config/store';
 import { execOnSsh, execScriptOnSsh } from '../../ssh/client';
 import { globalPool } from '../../ssh/pool';
@@ -41,6 +42,9 @@ execRouter.post('/:hostId/exec', async (req: Request, res: Response) => {
   const host = findHost(store, hostId);
   if (!host) {
     return res.status(404).json({ error: `主机 '${hostId}' 不存在` });
+  }
+  if (isHostDisabled(host)) {
+    return res.status(403).json({ error: `主机 '${hostId}' 已被禁用，无法执行远程操作。` });
   }
 
   const hasCommand = typeof body.command === 'string' && body.command.trim() !== '';

@@ -42,6 +42,23 @@ export const HostsPage: React.FC<Props> = ({ notify }) => {
     }
   }
 
+  async function toggleDisabled(h: HostConfigDto): Promise<void> {
+    const nextDisabled = !h.disabled;
+    if (!confirm(nextDisabled ? t('confirmDisable', h.hostId) : t('confirmEnable', h.hostId))) return;
+    try {
+      if (nextDisabled) {
+        await api.disableHost(h.hostId);
+        notify('ok', t('disabledOk', h.hostId));
+      } else {
+        await api.enableHost(h.hostId);
+        notify('ok', t('enabledOk', h.hostId));
+      }
+      refresh();
+    } catch (err) {
+      notify('fail', t('toggleDisabledFail', h.hostId) + ' · ' + (err as Error).message);
+    }
+  }
+
   async function test(id: string): Promise<void> {
     try {
       const r = await api.testHost(id);
@@ -104,13 +121,14 @@ export const HostsPage: React.FC<Props> = ({ notify }) => {
             ? h.tags
             : String(h.tags ?? '').split(',').map((s) => s.trim()).filter(Boolean);
           return (
-            <div className="host-row" key={h.hostId}>
+            <div className={h.disabled ? 'host-row disabled' : 'host-row'} key={h.hostId}>
               <div>
                 <span className="title">{h.hostId}</span>
                 <span style={{ color: 'var(--muted)' }}> · </span>
                 <code>
                   {h.username}@{h.host}:{h.port ?? 22}
                 </code>
+                {h.disabled && <span className="badge disabled">{t('hostDisabledBadge')}</span>}
                 {h.description && <div className="meta">{h.description}</div>}
                 {tagArr.length > 0 && (
                   <div className="meta">
@@ -127,11 +145,17 @@ export const HostsPage: React.FC<Props> = ({ notify }) => {
                 </div>
               </div>
               <div className="actions">
-                <button className="btn" onClick={() => test(h.hostId)}>
+                <button className="btn" onClick={() => test(h.hostId)} disabled={h.disabled}>
                   {t('test')}
                 </button>
                 <button className="btn" onClick={() => startEdit(h.hostId)}>
                   {t('edit')}
+                </button>
+                <button
+                  className={h.disabled ? 'btn primary' : 'btn'}
+                  onClick={() => toggleDisabled(h)}
+                >
+                  {h.disabled ? t('enable') : t('disable')}
                 </button>
                 <button className="btn danger" onClick={() => remove(h.hostId)}>
                   {t('remove')}

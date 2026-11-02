@@ -16,6 +16,8 @@ export interface HostConfigDto {
   hostHash?: string;
   readyTimeout?: number;
   tags?: string[] | string;
+  /** 是否被禁用（禁用后不能再执行远程操作） */
+  disabled?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -84,6 +86,12 @@ export const api = {
   updateHost: (hostId: string, patch: Partial<HostConfigDto>) =>
     request<{ updated: boolean }>('PUT', `/api/hosts/${enc(hostId)}`, patch),
   removeHost: (hostId: string) => request<{ removed: boolean }>('DELETE', `/api/hosts/${enc(hostId)}`),
+  /** 禁用主机（配置保留，不能再执行远程操作） */
+  disableHost: (hostId: string) =>
+    request<{ disabled: boolean; hostId: string }>('POST', `/api/hosts/${enc(hostId)}/disable`),
+  /** 启用之前被禁用的主机 */
+  enableHost: (hostId: string) =>
+    request<{ disabled: boolean; hostId: string }>('POST', `/api/hosts/${enc(hostId)}/enable`),
   testHost: (hostId: string, candidate?: HostConfigDto) =>
     request<TestResult>('POST', `/api/hosts/${enc(hostId)}/test`, candidate ?? {}),
 

@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 
 import {
   HostConfig,
+  isHostDisabled,
   plainView,
 } from '../../config/schema';
 import { isMasked, mergeHostConfig } from '../../config/merge';
@@ -16,8 +17,10 @@ import {
   findHost,
   loadStore,
   replaceHost,
+  setHostDisabled,
   upsertHost,
 } from '../../config/store';
+import { globalPool } from '../../ssh/pool';
 import { pingOnce } from '../../ssh/client';
 import { CreateHostBody, UpdateHostBody } from '../types';
 
@@ -159,6 +162,26 @@ hostsRouter.put('/:hostId', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/hosts/:hostId/disable
+//
+// 禁用主机：只是打标记，配置全部保留，随时可以启用回来。
+// 禁用后会立刻断开该主机的缓存连接 —— 否则「禁用」会被已有连接架空。
+hostsRouter.post('/:hostId/disable', async (req: Request, res: Response) => {
+  const hostId = String(req.params.hostId);
+  const disabled = await setHostDisabled(hostId, true);
+  if (disabled === undefined) return hostNotFound(res, hostId);
+  await globalPool.close(hostId);
+  res.json({ disabled: true, hostId });
+});
+
+// POST /api/hosts/:hostId/enable
+hostsRouter.post('/:hostId/enable', async (req: Request, res: Response) => {
+  const hostId = String(req.params.hostId);
+  const disabled = await setHostDisabled(hostId, false);
+  if (disabled === undefined) return hostNotFound(res, hostId);
+  res.json({ disabled: false, hostId });
+});
+
 // DELETE /api/hosts/:hostId
 hostsRouter.delete('/:hostId', async (req: Request, res: Response) => {
   const ok = await deleteHost(String(req.params.hostId));
@@ -189,6 +212,13 @@ hostsRouter.post('/:hostId/test', async (req: Request, res: Response) => {
     const store = await loadStore();
     const saved =
       findHost(store, pathHostId) ?? (candidate.hostId ? findHost(store, candidate.hostId) : undefined);
+    // 禁用状态以**已保存的记录**为准 —— 表单里那个勾选框只是编辑意图，
+    // 不该被用来绕过「禁用」。
+    if (saved && isHostDisabled(saved)) {
+      return res
+        .status(403)
+        .json({ error: `主机 '${saved.hostId}' 已被禁用，无法测试连通性。` });
+    }
     const merged = mergeHostConfig(saved, candidate);
     const r = await pingOnce(merged);
     return res.json(r);
@@ -199,6 +229,11 @@ hostsRouter.post('/:hostId/test', async (req: Request, res: Response) => {
   const host = findHost(store, pathHostId);
   if (!host) {
     return hostNotFound(res, pathHostId);
+  }
+  if (isHostDisabled(host)) {
+    return res
+      .status(403)
+      .json({ error: `主机 '${pathHostId}' 已被禁用，无法测试连通性。` });
   }
   const r = await pingOnce(host);
   res.json(r);

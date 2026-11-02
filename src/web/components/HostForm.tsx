@@ -24,6 +24,7 @@ const blank: HostConfigDto = {
   description: '',
   tags: [],
   readyTimeout: 15000,
+  disabled: false,
 };
 
 export const HostForm: React.FC<Props> = ({ initial, onSaved, onCancel, hostIdFixed }) => {
@@ -161,6 +162,18 @@ export const HostForm: React.FC<Props> = ({ initial, onSaved, onCancel, hostIdFi
           value={form.passphrase}
           onChange={(v) => patch('passphrase', v)}
         />
+        <label className="full">
+          <span>{t('fieldDisabled')}</span>
+          <label className="exec-inline">
+            <input
+              type="checkbox"
+              checked={form.disabled === true}
+              onChange={(e) => patch('disabled', e.target.checked)}
+            />
+            {t('fieldDisabledHint')}
+          </label>
+        </label>
+
         <label className="full">
           <span>{t('fieldTags')}</span>
           <input

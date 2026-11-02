@@ -136,6 +136,8 @@ ssh-driver history --limit 20
 ssh-driver install [--with-web] [--no-force] [--target <dir>]
 ssh-driver config add --hostId <id> --host <host> --username <user> [...]
 ssh-driver config list [--json] | show | update | remove | test
+ssh-driver config disable <hostId>          # 禁用主机（配置保留，禁止一切远程操作）
+ssh-driver config enable  <hostId>          # 恢复被禁用的主机
 ssh-driver connect <hostId>
 ssh-driver exec <hostId> "<cmd>" [--json] [--timeout <ms>]
 ssh-driver exec <hostId> --script <file> [--arg <v>]... [--interpreter <cmd>]
@@ -162,7 +164,25 @@ ssh-driver mcp
 | `--description` | | 人类可读描述 |
 | `--tags` | | 逗号分隔的标签 |
 | `--readyTimeout` | | 连接超时毫秒，默认 `15000` |
+| `--disabled` | | 保存后禁用该主机（不能再执行远程操作） |
 | `--test` | | 保存后立即测试连通性 |
+
+### 禁用主机
+
+某台机器「暂时别碰」时，可以把它禁用掉：
+
+```bash
+ssh-driver config disable prod-web-01   # 禁用
+ssh-driver config list                  # 列表里会标 [已禁用]
+ssh-driver config enable  prod-web-01   # 恢复
+```
+
+禁用后：
+
+- **所有远程操作被拒绝** —— `connect` / `exec` / `read` / `write` / `test` 全部报错
+- **配置完整保留** —— 密码、私钥、标签一个都不动，随时 `enable` 回来
+- **网页控制台同样可操作** —— 主机列表里的「禁用 / 启用」按钮，或编辑表单里的勾选框
+- **MCP / AI 侧也会被拦下** —— `list_hosts` 会返回 `disabled: true`，执行类工具直接报错
 
 ### `exec` 的输出模式
 
@@ -268,7 +288,8 @@ ssh-driver write prod-web-01 /opt/app/conf/app.conf --file ./app.conf --create-d
 
 | 工具 | 说明 |
 | --- | --- |
-| `list_hosts` | 列出已保存的主机（凭据脱敏） |
+| `list_hosts` | 列出已保存的主机（凭据脱敏，含 `disabled` 标记） |
+| `set_host_disabled` | 禁用 / 启用某台主机（`hostId` + `disabled`） |
 | `test_host` | 测试连通性 |
 | `exec_command` | 在远端执行一条命令 |
 | `exec_script` | 执行脚本（内容或本机文件路径），可传参数 |
@@ -306,6 +327,7 @@ ssh-driver console --dev            # 开发模式（vite HMR）
 ### 功能
 
 - **主机列表** — 按 hostId / 主机 / 用户 / 标签 过滤，测试、编辑、删除
+- **禁用 / 启用** — 一键把某台主机设为「暂时别碰」，被禁用的主机不会出现在远程执行的目标列表里
 - **主机编辑** — 表单内直接测试连通性，hostId 支持修改（重命名）
 - **远程执行** — 选主机 → 跑命令或脚本 → 看输出与退出码 → 下方是最近执行记录
 - **导入导出** — 下载 `ssh-driver-config.json`，或粘贴 JSON 导入（`replace` / `merge`）
@@ -325,6 +347,8 @@ ssh-driver console --dev            # 开发模式（vite HMR）
 | `PUT` | `/api/hosts/:hostId` | 更新（支持改名 hostId） |
 | `DELETE` | `/api/hosts/:hostId` | 删除 |
 | `POST` | `/api/hosts/:hostId/test` | 测试连通性 |
+| `POST` | `/api/hosts/:hostId/disable` | 禁用主机（配置保留） |
+| `POST` | `/api/hosts/:hostId/enable` | 启用主机 |
 | `POST` | `/api/hosts/:hostId/exec` | 执行命令或脚本 |
 | `GET` | `/api/io/export` | 导出配置（脱敏） |
 | `POST` | `/api/io/import` | 导入配置 |

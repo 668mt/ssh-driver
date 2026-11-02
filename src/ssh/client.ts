@@ -7,7 +7,7 @@
 import { NodeSSH, Config as SshConfig } from 'node-ssh';
 import type { ClientChannel } from 'ssh2';
 
-import { HostConfig } from '../config/schema';
+import { HostConfig, assertHostEnabled } from '../config/schema';
 
 export interface ExecResult {
   stdout: string;
@@ -248,6 +248,9 @@ function sendSignal(channel: ClientChannel, signalName: string): void {
  * 所有需要 SSH 连接的入口都应该走这里 —— 见 `guardConnectionErrors` 的说明。
  */
 export async function connectSsh(host: HostConfig): Promise<NodeSSH> {
+  // 被禁用的主机一律不连 —— 这是所有连接的唯一入口，
+  // 放在这里可以保证 CLI / MCP / 网页控制台三条路都拦得住。
+  assertHostEnabled(host);
   const ssh = new NodeSSH();
   await ssh.connect(buildSshConfig(host));
   guardConnectionErrors(ssh);

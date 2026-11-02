@@ -20,7 +20,7 @@ import { connectSsh } from '../ssh/client';
 import { RemoteFileExistsError, writeRemoteFile } from '../ssh/sftp';
 import { logger } from '../utils/logger';
 import { localFileNotFound, resolveLocalPath } from '../utils/localpath';
-import { HostConfig } from '../config/schema';
+import { HostConfig, assertHostEnabled } from '../config/schema';
 
 async function resolveHost(hostId: string): Promise<HostConfig> {
   const store = await loadStore();
@@ -30,6 +30,7 @@ async function resolveHost(hostId: string): Promise<HostConfig> {
       `主机 '${hostId}' 不存在，请先运行 'ssh-driver config list' 查看已保存的主机。`,
     );
   }
+  assertHostEnabled(host);
   return host;
 }
 

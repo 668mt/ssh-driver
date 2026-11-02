@@ -18,8 +18,8 @@
 
 import { Command } from 'commander';
 
-import { HostConfig } from '../config/schema';
-import { deleteHost, findHost, loadStore, upsertHost } from '../config/store';
+import { HostConfig, isHostDisabled } from '../config/schema';
+import { deleteHost, findHost, loadStore, setHostDisabled, upsertHost } from '../config/store';
 import { logger } from '../utils/logger';
 import { pingOnce } from '../ssh/client';
 
@@ -61,6 +61,7 @@ export async function configAdd(opts: {
   description?: string;
   readyTimeout?: string | number;
   tags?: string;
+  disabled?: boolean;
   test?: boolean;
 }): Promise<void> {
   const host: HostConfig = {
@@ -79,11 +80,18 @@ export async function configAdd(opts: {
         ? Number(opts.readyTimeout)
         : undefined,
     tags: opts.tags ? opts.tags.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    // 只在显式 --disabled 时写 true；不写就保留原有状态
+    disabled: opts.disabled === true ? true : undefined,
   };
 
   // 合并语义：没传的字段保留已保存的值（不会把密码抹掉）
   const { created } = await upsertHost(host);
   logger.info(created ? `已添加主机 '${host.hostId}'` : `已更新主机 '${host.hostId}'`);
+
+  if (opts.disabled === true) {
+    logger.info(`主机 '${host.hostId}' 已禁用，不能执行远程操作。`);
+    return;
+  }
 
   if (opts.test) {
     const stored = await loadHostOrThrow(host.hostId);
@@ -112,7 +120,8 @@ export async function configList(opts: { json?: boolean } = {}): Promise<void> {
   for (const h of store.hosts) {
     console.log(
       `${h.hostId}\t${h.username}@${h.host}:${h.port ?? 22}` +
-        (h.description ? `\t# ${h.description}` : ''),
+        (h.description ? `\t# ${h.description}` : '') +
+        (isHostDisabled(h) ? '\t[已禁用]' : ''),
     );
   }
 }
@@ -131,6 +140,18 @@ export async function configUpdate(
   logger.info(`已更新主机 '${hostId}'`);
 }
 
+export async function configDisable(hostId: string): Promise<void> {
+  const disabled = await setHostDisabled(hostId, true);
+  if (disabled === undefined) throw new Error(`主机 '${hostId}' 不存在`);
+  logger.info(`已禁用主机 '${hostId}'（配置保留，可用 'ssh-driver config enable ${hostId}' 恢复）`);
+}
+
+export async function configEnable(hostId: string): Promise<void> {
+  const disabled = await setHostDisabled(hostId, false);
+  if (disabled === undefined) throw new Error(`主机 '${hostId}' 不存在`);
+  logger.info(`已启用主机 '${hostId}'`);
+}
+
 export async function configRemove(hostId: string): Promise<void> {
   const ok = await deleteHost(hostId);
   if (!ok) throw new Error(`主机 '${hostId}' 不存在`);
@@ -139,6 +160,11 @@ export async function configRemove(hostId: string): Promise<void> {
 
 export async function configTest(hostId: string): Promise<void> {
   const host = await loadHostOrThrow(hostId);
+  if (isHostDisabled(host)) {
+    logger.error(`主机 '${hostId}' 已被禁用，无法测试连通性。`);
+    process.exitCode = 1;
+    return;
+  }
   const r = await pingOnce(host);
   if (r.ok) {
     logger.info(`连通  ${hostId}  ${r.banner ?? ''}`);
@@ -163,6 +189,7 @@ export function registerConfigCommand(program: Command): void {
     .option('--description <desc>', '人类可读描述')
     .option('--readyTimeout <ms>', '连接就绪超时（毫秒）')
     .option('--tags <tags>', '逗号分隔的标签')
+    .option('--disabled', '保存后禁用该主机（不能再执行远程操作）', false)
     .option('--test', '保存后立即测试连通性', false)
     .action(async (opts) => configAdd(opts));
 
@@ -190,17 +217,34 @@ export function registerConfigCommand(program: Command): void {
     .option('--description <desc>')
     .option('--readyTimeout <ms>')
     .option('--tags <tags>')
-    .action(async (hostId: string, opts: Record<string, string>) => {
+    .option('--disabled', '禁用该主机', false)
+    .option('--enabled', '启用该主机（与 --disabled 互斥）', false)
+    .action(async (hostId: string, opts: Record<string, unknown>) => {
       const patch: Partial<HostConfig> = {};
       for (const [k, v] of Object.entries(opts)) {
         if (v === undefined) continue;
         if (k === 'readyTimeout') patch.readyTimeout = Number(v);
         else if (k === 'port') patch.port = Number(v);
         else if (k === 'tags') patch.tags = String(v).split(',').map(s => s.trim()).filter(Boolean);
+        // --disabled / --enabled 是「开关」，下面统一处理，别写进配置当普通字段
+        else if (k === 'disabled' || k === 'enabled') continue;
         else (patch as Record<string, unknown>)[k] = v;
       }
+      // --disabled / --enabled 互斥：--enabled 优先
+      if (opts.enabled === true) patch.disabled = false;
+      else if (opts.disabled === true) patch.disabled = true;
       await configUpdate(hostId, patch);
     });
+
+  cmd
+    .command('disable <hostId>')
+    .description('禁用主机（配置保留，不能再连上去操作）')
+    .action(async (hostId: string) => configDisable(hostId));
+
+  cmd
+    .command('enable <hostId>')
+    .description('启用之前被禁用的主机')
+    .action(async (hostId: string) => configEnable(hostId));
 
   cmd
     .command('remove <hostId>')

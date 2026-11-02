@@ -20,8 +20,8 @@ import * as nodePath from 'path';
 import { z } from 'zod';
 
 import { appendAudit, readAudit, redactSecrets } from '../audit/log';
-import { HostConfig } from '../config/schema';
-import { findHost, loadStore } from '../config/store';
+import { HostConfig, isHostDisabled } from '../config/schema';
+import { findHost, loadStore, setHostDisabled } from '../config/store';
 import { execOnSsh, execScriptOnSsh } from '../ssh/client';
 import { globalPool, SshSessionPool } from '../ssh/pool';
 import { listRemoteDir, readRemoteFile, RemoteFileExistsError, writeRemoteFile } from '../ssh/sftp';
@@ -36,6 +36,7 @@ function maskHost(h: HostConfig): Record<string, unknown> {
     port: h.port ?? 22,
     username: h.username,
     tags: h.tags ?? [],
+    disabled: isHostDisabled(h),
     auth: h.privateKey ? 'privateKey' : h.password ? 'password' : 'none',
     readyTimeout: h.readyTimeout ?? 15000,
     createdAt: h.createdAt,
@@ -49,6 +50,13 @@ async function resolveHost(hostId: string): Promise<HostConfig> {
   if (!host) {
     const known = store.hosts.map(h => h.hostId).join(', ') || '（空）';
     throw new Error(`主机 '${hostId}' 不存在。已配置的主机：${known}`);
+  }
+  // 被禁用的主机直接拒绝 —— 否则 AI 侧会拿到一个莫名其妙的连接错误
+  if (isHostDisabled(host)) {
+    throw new Error(
+      `主机 '${hostId}' 已被禁用，无法执行远程操作。` +
+      `如需恢复，请调用 set_host_disabled(hostId='${hostId}', disabled=false)。`,
+    );
   }
   return host;
 }
@@ -95,6 +103,32 @@ export async function startMcpServer(opts: McpOptions = {}): Promise<{ close: ()
         hosts: store.hosts.map(maskHost),
         cachedSessions: stats.sessions.map(s => s.hostId),
       });
+    },
+  );
+
+  server.registerTool(
+    'set_host_disabled',
+    {
+      title: '禁用 / 启用主机',
+      description:
+        '禁用一台主机后，它将不能再被执行任何远程操作（命令 / 文件读写 / 测试连通性），' +
+        '但配置会完整保留，随时可以重新启用。',
+      inputSchema: {
+        hostId: z.string().describe('主机 id（先用 list_hosts 查）'),
+        disabled: z.boolean().describe('true = 禁用，false = 启用'),
+      },
+    },
+    async ({ hostId, disabled }) => {
+      try {
+        const result = await setHostDisabled(hostId, disabled);
+        if (result === undefined) {
+          return fail(`主机 '${hostId}' 不存在`);
+        }
+        if (disabled) await pool.close(hostId);
+        return ok({ hostId, disabled: result === true });
+      } catch (err) {
+        return fail(`设置禁用状态失败：${(err as Error).message}`);
+      }
     },
   );
 

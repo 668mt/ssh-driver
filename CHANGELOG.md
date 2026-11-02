@@ -15,6 +15,33 @@
 - 配置加密存储（配合系统 keychain）
 - 命令护栏（黑名单 / 只读模式）
 
+## [0.6.0] - 2026-11-02
+
+### 新增
+
+- **主机禁用 / 启用功能** —— 「这台机器暂时别碰」
+  - 配置新增 `disabled` 字段（布尔）；禁用**只打标记**，凭据 / 标签等配置全部保留
+  - CLI：`ssh-driver config disable <hostId>` / `ssh-driver config enable <hostId>`
+    - `config add --disabled` 建好即禁用
+    - `config update <hostId> --disabled` / `--enabled` 切换
+    - `config list` 里被禁用的主机标 `[已禁用]`
+  - 网页控制台：主机列表的「禁用 / 启用」按钮 + 编辑表单里的「禁用该主机」勾选框
+    - 被禁用的主机整行置灰并显示「已禁用」徽标
+    - 被禁用的主机不会出现在「远程执行」的目标主机下拉里
+  - REST API：`POST /api/hosts/:hostId/disable` / `POST /api/hosts/:hostId/enable`
+  - MCP：新增 `set_host_disabled(hostId, disabled)` 工具；`list_hosts` 返回 `disabled` 标记
+  - 禁用后**所有远程操作被拒绝**（`connect` / `exec` / `read` / `write` / `test`）：
+    - CLI 报「主机 'x' 已被禁用，无法执行远程操作」
+    - REST 返回 403
+    - MCP 返回结构化错误，并提示如何恢复
+  - 拦截点放在**所有连接的唯一入口**（`connectSsh`）与连接池（`withSession`），
+    禁用后即便已有缓存连接也用不了
+  - 禁用时会立刻断开该主机的缓存连接
+
+### 变更
+
+- 落盘前归一化 `disabled` 字段：`disabled: false` 会被删掉，不在配置里留噪音
+
 ## [0.5.0] - 2026-10-27
 
 ### 新增
@@ -228,7 +255,8 @@
   - `--timeout` 命令级超时（best-effort，不强制终止远端进程）
 - AI Skill 定义 `skill/SKILL.md`，包含配置流程、字段约定与注意事项
 
-[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/668mt/ssh-driver/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/668mt/ssh-driver/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/668mt/ssh-driver/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/668mt/ssh-driver/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/668mt/ssh-driver/compare/v0.2.0...v0.3.0

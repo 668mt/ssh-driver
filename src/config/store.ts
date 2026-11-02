@@ -89,6 +89,18 @@ export async function saveStore(store: StoreFile): Promise<void> {
   const file = getStoreFile();
   await fs.mkdir(dir, { recursive: true });
 
+  // 落盘前归一化：`disabled: false` 直接删掉这个键
+  //
+  // 为什么在这里做，而不是在 mergeHostConfig 里：
+  // mergeHostConfig 的语义是「undefined 保留原值」，没法表达「删掉这个键」。
+  // 而 replaceHost 会对已合并的结果**再合并一次**（existing ← next），
+  // 如果在 merge 里就把 false 删掉，第二次合并时 next.disabled 变成 undefined，
+  // 于是「取消禁用」会被当成「没传」→ 原值 true 又回来了。
+  // 在写盘这一层归一化，两次合并的中间状态都不会丢语义。
+  for (const h of store.hosts) {
+    if (h.disabled === false) delete h.disabled;
+  }
+
   const tmp = `${file}.tmp`;
   const data = JSON.stringify(store, null, 2);
   const fh = await fs.open(tmp, 'w', 0o600);
@@ -234,6 +246,31 @@ export async function replaceHost(oldHostId: string, next: HostConfig): Promise<
     merged.updatedAt = new Date().toISOString();
     store.hosts[idx] = merged;
     await saveStore(store);
+  });
+}
+
+/**
+ * 启用 / 禁用一台主机。
+ *
+ * 禁用只是打标记（`disabled: true`），配置全部保留，随时可以启用回来。
+ * 返回禁用后的新状态；主机不存在返回 undefined。
+ */
+export async function setHostDisabled(
+  hostId: string,
+  disabled: boolean,
+): Promise<boolean | undefined> {
+  return withStoreLock(async () => {
+    const store = await loadStore();
+    const idx = store.hosts.findIndex(h => h.hostId.toLowerCase() === hostId.toLowerCase());
+    if (idx < 0) return undefined;
+    const host = store.hosts[idx];
+    if (disabled) host.disabled = true;
+    // 启用时直接删掉这个键 —— 避免存下一堆 `disabled: false` 的噪音
+    else delete host.disabled;
+    host.updatedAt = new Date().toISOString();
+    store.hosts[idx] = host;
+    await saveStore(store);
+    return host.disabled === true;
   });
 }
 

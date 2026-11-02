@@ -28,9 +28,41 @@ export interface HostConfig {
   readyTimeout?: number;
   /** 标签，便于分组 */
   tags?: string[];
+  /**
+   * 是否被禁用。
+   *
+   * 禁用后该主机**只读**：不能连接、不能执行命令、不能读写文件。
+   * 配置仍然保留，随时可以重新启用。用于「这台机器暂时别碰」。
+   */
+  disabled?: boolean;
   /** 创建/更新时间（ISO） */
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * 主机被禁用时抛出的错误。
+ *
+ * 单独一个类型，是为了让调用方能区分「被禁用」和「连不上」——
+ * 前者是策略问题（换个 host 或先启用），后者是技术问题。
+ */
+export class HostDisabledError extends Error {
+  readonly code = 'HOST_DISABLED';
+
+  constructor(hostId: string) {
+    super(`主机 '${hostId}' 已被禁用，无法执行远程操作。请先启用该主机。`);
+    this.name = 'HostDisabledError';
+  }
+}
+
+/** 该主机是否处于禁用状态 */
+export function isHostDisabled(host: Pick<HostConfig, 'disabled'>): boolean {
+  return host.disabled === true;
+}
+
+/** 主机被禁用就抛错 —— 所有「要连上去干活」的地方都应先过这一关 */
+export function assertHostEnabled(host: Pick<HostConfig, 'hostId' | 'disabled'>): void {
+  if (isHostDisabled(host)) throw new HostDisabledError(host.hostId);
 }
 
 /** 持久化的根结构 */

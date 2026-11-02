@@ -45,6 +45,14 @@ export interface Strings {
   testFailMsg: (id: string, err: string) => string;
   fetchListFail: (err: string) => string;
   saveOk: (id: string) => string;
+  disable: string;
+  enable: string;
+  confirmDisable: (id: string) => string;
+  confirmEnable: (id: string) => string;
+  disabledOk: (id: string) => string;
+  enabledOk: (id: string) => string;
+  toggleDisabledFail: (id: string) => string;
+  hostDisabledBadge: string;
 
   // HostForm
   formNewTitle: string;
@@ -63,6 +71,8 @@ export interface Strings {
   fieldPassphrase: string;
   fieldTags: string;
   fieldTagsPh: string;
+  fieldDisabled: string;
+  fieldDisabledHint: string;
 
   phHostId: string;
   phHost: string;
@@ -148,6 +158,14 @@ const zhCN: Strings = {
   testFailMsg: (id, err) => `${id} 不通 · ${err}`,
   fetchListFail: (err) => `读取主机列表失败 · ${err}`,
   saveOk: (id) => `已保存 ${id}`,
+  disable: '禁用',
+  enable: '启用',
+  confirmDisable: (id) => `确认禁用主机 “${id}”？禁用后将无法执行任何远程操作，配置会保留。`,
+  confirmEnable: (id) => `确认启用主机 “${id}”？`,
+  disabledOk: (id) => `已禁用 ${id}`,
+  enabledOk: (id) => `已启用 ${id}`,
+  toggleDisabledFail: (id) => `操作 ${id} 失败`,
+  hostDisabledBadge: '已禁用',
 
   formNewTitle: '新增主机',
   formEditTitle: (id) => `编辑 · ${id}`,
@@ -166,6 +184,8 @@ const zhCN: Strings = {
   fieldPassphrase: '私钥口令 (可选)',
   fieldTags: '标签 (英文逗号分隔)',
   fieldTagsPh: 'prod, web',
+  fieldDisabled: '禁用该主机',
+  fieldDisabledHint: '禁用后无法在这台主机上执行任何远程操作（配置会保留）',
 
   phHostId: 'prod-web-01',
   phHost: '10.0.1.10',

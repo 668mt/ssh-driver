@@ -36,11 +36,13 @@ ssh-driver install [--with-web] [--no-force] [--target <dir>]
 ssh-driver console [--port <n>] [--host <addr>] [--dev] [--no-open]
                     # 打开本地网页 console，浏览器中管理 connections
 
-ssh-driver config add    --hostId <id> --host <host> --username <user> [--port <p>] [--password <pwd> | --privateKey <path>] [--passphrase <pp>] [--hostHash <sha256:...>] [--description <desc>] [--tags <a,b>] [--test]
+ssh-driver config add    --hostId <id> --host <host> --username <user> [--port <p>] [--password <pwd> | --privateKey <path>] [--passphrase <pp>] [--hostHash <sha256:...>] [--description <desc>] [--tags <a,b>] [--disabled] [--test]
 ssh-driver config list                              # 列已保存的 host
 ssh-driver config list --json                       # 结构化输出（凭据脱敏）
 ssh-driver config show   <hostId>                   # 查看单项（敏感字段掩码）
 ssh-driver config update <hostId> [--port 2222] ...
+ssh-driver config disable <hostId>                  # 禁用主机（配置保留，禁止一切远程操作）
+ssh-driver config enable  <hostId>                  # 恢复被禁用的主机
 ssh-driver config remove <hostId>
 ssh-driver config test   <hostId>                   # 测活
 
@@ -66,6 +68,7 @@ ssh-driver mcp                                      # 以 MCP (stdio) 模式启�
 | `hostHash` | 主机密钥指纹 | 可选，配了就强制校验，防中间人 |
 | `description` | 人类可读描述 | 不影响逻辑 |
 | `tags` | 标签，`a,b,c` | 不影响逻辑 |
+| `disabled` | 是否禁用 | 禁用后该主机**禁止一切远程操作**（connect / exec / read / write / test），配置保留，可随时 `config enable` 恢复 |
 
 ### 合并语义（重要）
 
@@ -150,7 +153,8 @@ MCP 客户端配置：
 
 | 工具 | 说明 |
 | --- | --- |
-| `list_hosts` | 列出已保存的主机（凭据脱敏） |
+| `list_hosts` | 列出已保存的主机（凭据脱敏，含 `disabled` 标记） |
+| `set_host_disabled` | 禁用 / 启用某台主机（`hostId` + `disabled`） |
 | `test_host` | 测试连通性 |
 | `exec_command` | 在远端执行一条命令 |
 | `exec_script` | 执行脚本（内容或本机文件路径） |

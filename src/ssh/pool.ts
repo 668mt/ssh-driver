@@ -18,7 +18,7 @@
 import { NodeSSH } from 'node-ssh';
 import type { Client } from 'ssh2';
 
-import { HostConfig } from '../config/schema';
+import { HostConfig, assertHostEnabled } from '../config/schema';
 import { CommandTimeoutError, connectSsh } from './client';
 
 export interface PoolOptions {
@@ -323,6 +323,8 @@ export class SshSessionPool {
     opts: { retry?: boolean } = {},
   ): Promise<T> {
     const retry = opts.retry !== false;
+    // 被禁用的主机即使已有缓存连接也不能用 —— 否则「禁用」会形同虚设
+    assertHostEnabled(host);
     // 先占闸门位，再拿连接 —— 顺序反了会出现「拿到了连接却在排队」，
     // 导致连接被 sweeper 当成空闲回收掉。
     const gate = this.gate(host.hostId);
